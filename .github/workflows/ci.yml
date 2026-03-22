@@ -2,9 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    tags:
+      - 'v*'
+
+permissions:
+  checks: write
 
 jobs:
   build:
@@ -23,3 +25,11 @@ jobs:
 
       - name: Build and test
         run: ./gradlew build
+
+      - name: Upload test results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: Test Results
+          path: build/test-results/test/*.xml
+          reporter: java-junit
