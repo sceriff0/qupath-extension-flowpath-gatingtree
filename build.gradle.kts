@@ -6,7 +6,7 @@ plugins {
 qupathExtension {
     name = "qupath-extension-gatetree"
     group = "io.github.qupath"
-    version = "0.1.0-SNAPSHOT"
+    version = "0.1.0"
     description = "Interactive tree-based cell phenotyping gating for multiplexed imaging"
     automaticModule = "io.github.qupath.extension.gatetree"
 }
