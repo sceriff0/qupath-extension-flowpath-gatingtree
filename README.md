@@ -39,7 +39,7 @@ Download the latest JAR from [Releases](../../releases) and drag it onto QuPath.
 git clone https://github.com/sceriff0/qupath-extension-gatetree.git
 cd qupath-extension-gatetree
 ./gradlew build
-# JAR at build/libs/qupath-extension-gatetree-0.2.0.jar → drag onto QuPath
+# JAR at build/libs/qupath-extension-gatetree-0.4.0.jar → drag onto QuPath
 ```
 
 ## Quick Start
