@@ -1,0 +1,418 @@
+package qupath.ext.gatetree.ui;
+
+import javafx.application.Platform;
+import javafx.geometry.Insets;
+import javafx.geometry.Orientation;
+import javafx.scene.control.*;
+import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.VBox;
+import qupath.ext.gatetree.engine.GatingEngine;
+import qupath.ext.gatetree.engine.LivePreviewService;
+import qupath.ext.gatetree.io.GateTreeSerializer;
+import qupath.ext.gatetree.io.PhenotypeCsvExporter;
+import qupath.ext.gatetree.model.*;
+import qupath.lib.gui.QuPathGUI;
+import qupath.lib.gui.dialogs.Dialogs;
+import qupath.lib.images.ImageData;
+import qupath.lib.objects.PathObject;
+
+import java.io.File;
+import java.util.*;
+import java.util.stream.Collectors;
+
+/**
+ * Main panel for the Gate Tree extension.
+ * SplitPane: TreeView + QualityFilterPane (left), GateEditorPane (right).
+ * Toolbar at bottom for save/load/export.
+ */
+public class GateTreePane extends BorderPane {
+
+    private final QuPathGUI qupath;
+    private final TreeView<Object> treeView;
+    private final GateEditorPane editorPane;
+    private final QualityFilterPane qualityFilterPane;
+    private final LivePreviewService previewService;
+
+    private GateTree gateTree;
+    private CellIndex cellIndex;
+    private MarkerStats markerStats;
+    private List<String> markerNames;
+
+    public GateTreePane(QuPathGUI qupath) {
+        this.qupath = qupath;
+        this.gateTree = new GateTree();
+        this.previewService = new LivePreviewService();
+
+        // --- Left side: TreeView + Quality Filter ---
+        treeView = new TreeView<>();
+        treeView.setCellFactory(tv -> new GateTreeCell());
+        treeView.setShowRoot(false);
+        treeView.setRoot(new TreeItem<>("Root"));
+        treeView.getSelectionModel().selectedItemProperty().addListener((obs, old, sel) -> onTreeSelectionChanged(sel));
+
+        // Add root gate button
+        Button addRootBtn = new Button("+ Add Root Gate");
+        addRootBtn.setMaxWidth(Double.MAX_VALUE);
+        addRootBtn.setOnAction(e -> addRootGate());
+
+        qualityFilterPane = new QualityFilterPane(gateTree.getQualityFilter());
+        qualityFilterPane.setOnFilterChanged(filter -> onQualityFilterChanged());
+
+        VBox leftPane = new VBox(4, treeView, addRootBtn, qualityFilterPane);
+        VBox.setVgrow(treeView, Priority.ALWAYS);
+        leftPane.setPadding(new Insets(4));
+        leftPane.setPrefWidth(280);
+
+        // --- Right side: Gate Editor ---
+        editorPane = new GateEditorPane();
+        editorPane.setOnNodeChanged(node -> onGateNodeChanged());
+        editorPane.setOnAddToPositive(this::addGateToPositive);
+        editorPane.setOnAddToNegative(this::addGateToNegative);
+        editorPane.setOnRemoveGate(this::removeSelectedGate);
+
+        ScrollPane editorScroll = new ScrollPane(editorPane);
+        editorScroll.setFitToWidth(true);
+        editorScroll.setPrefWidth(420);
+
+        // --- SplitPane ---
+        SplitPane splitPane = new SplitPane(leftPane, editorScroll);
+        splitPane.setDividerPositions(0.4);
+        setCenter(splitPane);
+
+        // --- Bottom toolbar ---
+        Button saveBtn = new Button("Save JSON");
+        saveBtn.setOnAction(e -> saveTree());
+        Button loadBtn = new Button("Load JSON");
+        loadBtn.setOnAction(e -> loadTree());
+        Button exportBtn = new Button("Export CSV");
+        exportBtn.setOnAction(e -> exportCsv());
+
+        HBox toolbar = new HBox(8, saveBtn, loadBtn, new Separator(Orientation.VERTICAL), exportBtn);
+        toolbar.setPadding(new Insets(6));
+        setBottom(toolbar);
+
+        // Style
+        setStyle("-fx-background-color: #1e1e1e;");
+
+        // Initialize from current image
+        Platform.runLater(this::initializeFromImage);
+
+        // Listen for image changes
+        qupath.imageDataProperty().addListener((obs, oldImg, newImg) -> {
+            Platform.runLater(this::initializeFromImage);
+        });
+    }
+
+    /**
+     * Build CellIndex and MarkerStats from the currently loaded image's detections.
+     */
+    private void initializeFromImage() {
+        ImageData<?> imageData = qupath.getImageData();
+        if (imageData == null) {
+            cellIndex = null;
+            markerStats = null;
+            markerNames = Collections.emptyList();
+            editorPane.setChannelNames(markerNames);
+            return;
+        }
+
+        Collection<PathObject> detections = imageData.getHierarchy().getDetectionObjects();
+        if (detections.isEmpty()) {
+            Dialogs.showWarningNotification("Gate Tree", "No detections found. Import GeoJSON cells first.");
+            return;
+        }
+
+        // Discover marker names from first detection's measurements
+        markerNames = discoverMarkerNames(detections);
+
+        cellIndex = CellIndex.build(detections, markerNames);
+
+        // Compute quality mask and stats
+        boolean[] qualityMask = GatingEngine.computeQualityMask(cellIndex, gateTree.getQualityFilter());
+        markerStats = MarkerStats.compute(cellIndex, qualityMask);
+
+        // Update UI
+        editorPane.setChannelNames(markerNames);
+        editorPane.setCellIndex(cellIndex);
+        editorPane.setMarkerStats(markerStats);
+
+        // Update quality filter ranges
+        double maxArea = 0, maxTotalInt = 0;
+        for (int i = 0; i < cellIndex.size(); i++) {
+            maxArea = Math.max(maxArea, cellIndex.getArea(i));
+            maxTotalInt = Math.max(maxTotalInt, cellIndex.getTotalIntensity(i));
+        }
+        qualityFilterPane.updateRanges(maxArea, maxTotalInt);
+        updateFilteredCount();
+
+        // Setup preview service
+        previewService.setCellIndex(cellIndex);
+        previewService.setMarkerStats(markerStats);
+        previewService.setGateTree(gateTree);
+        previewService.setImageData(imageData);
+        previewService.setUseZScore(editorPane.isUseZScore());
+        previewService.setOnUpdateComplete(this::onPreviewUpdated);
+    }
+
+    /**
+     * Discover marker names from detection measurements.
+     * Excludes morphological measurements and coordinate fields.
+     */
+    private List<String> discoverMarkerNames(Collection<PathObject> detections) {
+        Set<String> exclude = Set.of(
+            "Centroid X µm", "Centroid Y µm",
+            "area µm²", "eccentricity", "perimeter", "convex_area",
+            "axis_major_length", "axis_minor_length",
+            "x", "y", "label", "fov", "cell_size"
+        );
+
+        PathObject sample = detections.iterator().next();
+        var measurements = sample.getMeasurements();
+        if (measurements == null || measurements.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        return measurements.keySet().stream()
+            .filter(name -> !exclude.contains(name))
+            .filter(name -> !name.startsWith("["))  // Skip layer metadata
+            .filter(name -> !name.startsWith("_"))
+            .sorted()
+            .collect(Collectors.toList());
+    }
+
+    // --- Tree building ---
+
+    private void rebuildTreeView() {
+        TreeItem<Object> root = new TreeItem<>("Root");
+        for (GateNode gate : gateTree.getRoots()) {
+            root.getChildren().add(buildTreeItem(gate));
+        }
+        treeView.setRoot(root);
+        root.setExpanded(true);
+        expandAll(root);
+    }
+
+    private TreeItem<Object> buildTreeItem(GateNode gate) {
+        TreeItem<Object> gateItem = new TreeItem<>(gate);
+        gateItem.setExpanded(true);
+
+        // Positive branch
+        TreeItem<Object> posItem = new TreeItem<>(new GateTreeCell.BranchItem(gate, true));
+        posItem.setExpanded(true);
+        for (GateNode child : gate.getPositiveChildren()) {
+            posItem.getChildren().add(buildTreeItem(child));
+        }
+        gateItem.getChildren().add(posItem);
+
+        // Negative branch
+        TreeItem<Object> negItem = new TreeItem<>(new GateTreeCell.BranchItem(gate, false));
+        negItem.setExpanded(true);
+        for (GateNode child : gate.getNegativeChildren()) {
+            negItem.getChildren().add(buildTreeItem(child));
+        }
+        gateItem.getChildren().add(negItem);
+
+        return gateItem;
+    }
+
+    private void expandAll(TreeItem<?> item) {
+        item.setExpanded(true);
+        for (TreeItem<?> child : item.getChildren()) {
+            expandAll(child);
+        }
+    }
+
+    // --- Gate operations ---
+
+    private void addRootGate() {
+        if (markerNames == null || markerNames.isEmpty()) {
+            Dialogs.showWarningNotification("Gate Tree", "No markers available. Load an image with detections first.");
+            return;
+        }
+
+        String channel = markerNames.get(0);
+        GateNode node = new GateNode(channel);
+        gateTree.addRoot(node);
+        rebuildTreeView();
+        requestPreviewUpdate();
+    }
+
+    private void addGateToPositive() {
+        GateNode selected = getSelectedGateNode();
+        if (selected == null || markerNames == null || markerNames.isEmpty()) return;
+
+        String channel = markerNames.get(0);
+        GateNode child = new GateNode(channel);
+        selected.getPositiveChildren().add(child);
+        rebuildTreeView();
+        requestPreviewUpdate();
+    }
+
+    private void addGateToNegative() {
+        GateNode selected = getSelectedGateNode();
+        if (selected == null || markerNames == null || markerNames.isEmpty()) return;
+
+        String channel = markerNames.get(0);
+        GateNode child = new GateNode(channel);
+        selected.getNegativeChildren().add(child);
+        rebuildTreeView();
+        requestPreviewUpdate();
+    }
+
+    private void removeSelectedGate() {
+        GateNode selected = getSelectedGateNode();
+        if (selected == null) return;
+
+        boolean hasChildren = !selected.getPositiveChildren().isEmpty() || !selected.getNegativeChildren().isEmpty();
+        if (hasChildren) {
+            boolean confirm = Dialogs.showConfirmDialog("Remove Gate",
+                "This gate has child gates. Remove entire subtree?");
+            if (!confirm) return;
+        }
+
+        // Remove from parent
+        if (!gateTree.getRoots().remove(selected)) {
+            removeFromTree(gateTree.getRoots(), selected);
+        }
+
+        editorPane.setGateNode(null);
+        rebuildTreeView();
+        requestPreviewUpdate();
+    }
+
+    private boolean removeFromTree(List<GateNode> nodes, GateNode target) {
+        for (GateNode node : nodes) {
+            if (node.getPositiveChildren().remove(target)) return true;
+            if (node.getNegativeChildren().remove(target)) return true;
+            if (removeFromTree(node.getPositiveChildren(), target)) return true;
+            if (removeFromTree(node.getNegativeChildren(), target)) return true;
+        }
+        return false;
+    }
+
+    // --- Selection handling ---
+
+    private void onTreeSelectionChanged(TreeItem<Object> selected) {
+        if (selected == null) {
+            editorPane.setGateNode(null);
+            return;
+        }
+
+        Object item = selected.getValue();
+        if (item instanceof GateNode node) {
+            editorPane.setGateNode(node);
+        } else if (item instanceof GateTreeCell.BranchItem branch) {
+            editorPane.setGateNode(branch.parentGate);
+        } else {
+            editorPane.setGateNode(null);
+        }
+    }
+
+    private GateNode getSelectedGateNode() {
+        TreeItem<Object> sel = treeView.getSelectionModel().getSelectedItem();
+        if (sel == null) return null;
+        Object item = sel.getValue();
+        if (item instanceof GateNode node) return node;
+        if (item instanceof GateTreeCell.BranchItem branch) return branch.parentGate;
+        return null;
+    }
+
+    // --- Updates ---
+
+    private void onGateNodeChanged() {
+        previewService.setUseZScore(editorPane.isUseZScore());
+        requestPreviewUpdate();
+    }
+
+    private void onQualityFilterChanged() {
+        if (cellIndex == null) return;
+
+        // Recompute stats with new quality mask
+        boolean[] qualityMask = GatingEngine.computeQualityMask(cellIndex, gateTree.getQualityFilter());
+        markerStats = MarkerStats.compute(cellIndex, qualityMask);
+        editorPane.setMarkerStats(markerStats);
+        previewService.setMarkerStats(markerStats);
+
+        updateFilteredCount();
+        requestPreviewUpdate();
+    }
+
+    private void updateFilteredCount() {
+        if (cellIndex == null) return;
+        boolean[] mask = GatingEngine.computeQualityMask(cellIndex, gateTree.getQualityFilter());
+        int passing = 0;
+        for (boolean b : mask) if (b) passing++;
+        int filtered = cellIndex.size() - passing;
+        qualityFilterPane.setFilteredCount(filtered, cellIndex.size());
+    }
+
+    private void requestPreviewUpdate() {
+        previewService.setGateTree(gateTree);
+        previewService.requestUpdate();
+    }
+
+    private void onPreviewUpdated() {
+        // Refresh tree cell counts
+        Platform.runLater(() -> {
+            treeView.refresh();
+        });
+    }
+
+    // --- IO ---
+
+    private void saveTree() {
+        File file = Dialogs.promptToSaveFile("Save Gate Tree", null, "gate_tree.json", "JSON", ".json");
+        if (file == null) return;
+        try {
+            GateTreeSerializer.save(gateTree, file);
+            Dialogs.showInfoNotification("Gate Tree", "Saved to " + file.getName());
+        } catch (Exception ex) {
+            Dialogs.showErrorMessage("Save Error", ex.getMessage());
+        }
+    }
+
+    private void loadTree() {
+        File file = Dialogs.promptForFile("Load Gate Tree", null, "JSON", ".json");
+        if (file == null) return;
+        try {
+            gateTree = GateTreeSerializer.load(file);
+            // Sync the quality filter pane to the new filter object
+            qualityFilterPane.setFilter(gateTree.getQualityFilter());
+            qualityFilterPane.setOnFilterChanged(filter -> onQualityFilterChanged());
+
+            rebuildTreeView();
+            onQualityFilterChanged();
+            Dialogs.showInfoNotification("Gate Tree", "Loaded from " + file.getName());
+        } catch (Exception ex) {
+            Dialogs.showErrorMessage("Load Error", ex.getMessage());
+        }
+    }
+
+    private void exportCsv() {
+        if (cellIndex == null || markerStats == null || gateTree.getRoots().isEmpty()) {
+            Dialogs.showWarningNotification("Gate Tree", "No gates defined or no cells loaded.");
+            return;
+        }
+
+        File file = Dialogs.promptToSaveFile("Export Phenotypes", null, "gate_pheno.csv", "CSV", ".csv");
+        if (file == null) return;
+
+        try {
+            GatingEngine.AssignmentResult result = GatingEngine.assignAll(
+                gateTree, cellIndex, markerStats, editorPane.isUseZScore());
+            PhenotypeCsvExporter.export(file, cellIndex, result, gateTree);
+            Dialogs.showInfoNotification("Gate Tree", "Exported " + file.getName());
+        } catch (Exception ex) {
+            Dialogs.showErrorMessage("Export Error", ex.getMessage());
+        }
+    }
+
+    /**
+     * Clean up resources when the window is closed.
+     */
+    public void shutdown() {
+        previewService.shutdown();
+    }
+}
