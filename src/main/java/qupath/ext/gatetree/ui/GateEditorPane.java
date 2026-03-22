@@ -27,7 +27,8 @@ public class GateEditorPane extends VBox {
     private final RadioButton zscoreModeBtn;
     private final HistogramCanvas histogram;
     private final Slider thresholdSlider;
-    private final Label thresholdValueLabel;
+    private final TextField thresholdValueField;
+    private final Label populationCountsLabel;
     private final TextField posNameField;
     private final TextField negNameField;
     private final ColorPicker posColorPicker;
@@ -83,6 +84,9 @@ public class GateEditorPane extends VBox {
         });
         HBox modeRow = new HBox(12, new Label("Mode:") {{ setStyle("-fx-text-fill: white;"); }}, rawModeBtn, zscoreModeBtn);
 
+        // Histogram section header
+        Label histogramHeader = createSectionHeader("Histogram");
+
         // Histogram
         histogram = new HistogramCanvas();
         // Threshold callback wired after all fields are initialized (see bottom of constructor)
@@ -90,24 +94,42 @@ public class GateEditorPane extends VBox {
         hoverLabel.setStyle("-fx-text-fill: #aaaaaa; -fx-font-size: 9;");
         histogram.setOnMouseHover(val -> hoverLabel.setText(String.format("Value: %.4f", val)));
 
+        // Threshold section header
+        Label thresholdHeader = createSectionHeader("Threshold");
+
         // Threshold slider
         thresholdSlider = new Slider(-5, 5, 0);
         thresholdSlider.setPrefWidth(300);
         thresholdSlider.setBlockIncrement(0.01);
-        thresholdValueLabel = new Label("0.0000");
-        thresholdValueLabel.setStyle("-fx-text-fill: white; -fx-font-family: monospace;");
+        thresholdValueField = new TextField("0.0000");
+        thresholdValueField.setPrefWidth(80);
+        thresholdValueField.setStyle("-fx-text-fill: white; -fx-font-family: monospace; -fx-background-color: #3a3a3a;");
         thresholdSlider.valueProperty().addListener((obs, old, val) -> {
             if (!suppressEvents && currentNode != null) {
                 currentNode.setThreshold(val.doubleValue());
-                thresholdValueLabel.setText(String.format("%.4f", val.doubleValue()));
+                thresholdValueField.setText(String.format("%.4f", val.doubleValue()));
                 histogram.setThreshold(val.doubleValue());
                 fireNodeChanged();
+                updatePopulationCounts();
             }
         });
+        // Allow typing exact threshold values
+        thresholdValueField.setOnAction(e -> applyThresholdFromField());
+        thresholdValueField.focusedProperty().addListener((obs, old, focused) -> {
+            if (!focused) applyThresholdFromField();
+        });
+
         HBox threshRow = new HBox(8,
             new Label("Threshold:") {{ setStyle("-fx-text-fill: white;"); }},
-            thresholdSlider, thresholdValueLabel);
+            thresholdSlider, thresholdValueField);
         HBox.setHgrow(thresholdSlider, Priority.ALWAYS);
+
+        // Population counts label
+        populationCountsLabel = new Label("Positive: -- | Negative: --");
+        populationCountsLabel.setStyle("-fx-text-fill: #aaaaaa; -fx-font-size: 10;");
+
+        // Outlier Clipping section header
+        Label clipHeader = createSectionHeader("Outlier Clipping");
 
         // Clip percentiles
         clipLowSpinner = new Spinner<>(0.0, 50.0, 1.0, 0.5);
@@ -146,6 +168,9 @@ public class GateEditorPane extends VBox {
             clipHighSpinner, new Label("%") {{ setStyle("-fx-text-fill: white;"); }},
             excludeOutliersBox);
 
+        // Population Names section header
+        Label namesHeader = createSectionHeader("Population Names");
+
         // Positive / Negative names and colors
         GridPane namesGrid = new GridPane();
         namesGrid.setHgap(6);
@@ -156,14 +181,14 @@ public class GateEditorPane extends VBox {
         posNameField = new TextField("Pos");
         posNameField.setPrefWidth(120);
         posColorPicker = new ColorPicker(Color.rgb(0, 200, 0));
-        posColorPicker.setPrefWidth(60);
+        posColorPicker.setPrefWidth(80);
 
         Label negLabel = new Label("Negative:");
         negLabel.setStyle("-fx-text-fill: #999999;");
         negNameField = new TextField("Neg");
         negNameField.setPrefWidth(120);
         negColorPicker = new ColorPicker(Color.rgb(160, 160, 160));
-        negColorPicker.setPrefWidth(60);
+        negColorPicker.setPrefWidth(80);
 
         namesGrid.add(posLabel, 0, 0);
         namesGrid.add(posNameField, 1, 0);
@@ -217,10 +242,11 @@ public class GateEditorPane extends VBox {
         // Assemble
         getChildren().addAll(
             channelRow, modeRow,
-            histogram, hoverLabel,
-            threshRow, clipRow,
+            histogramHeader, histogram, hoverLabel,
+            thresholdHeader, threshRow, populationCountsLabel,
+            clipHeader, clipRow,
             new Separator(),
-            namesGrid,
+            namesHeader, namesGrid,
             new Separator(),
             buttonRow
         );
@@ -244,8 +270,9 @@ public class GateEditorPane extends VBox {
             if (!suppressEvents && currentNode != null) {
                 currentNode.setThreshold(val);
                 thresholdSlider.setValue(val);
-                thresholdValueLabel.setText(String.format("%.4f", val));
+                thresholdValueField.setText(String.format("%.4f", val));
                 fireNodeChanged();
+                updatePopulationCounts();
             }
         });
 
@@ -275,7 +302,7 @@ public class GateEditorPane extends VBox {
         }
 
         thresholdSlider.setValue(node.getThreshold());
-        thresholdValueLabel.setText(String.format("%.4f", node.getThreshold()));
+        thresholdValueField.setText(String.format("%.4f", node.getThreshold()));
 
         posNameField.setText(node.getPositiveName());
         negNameField.setText(node.getNegativeName());
@@ -365,6 +392,8 @@ public class GateEditorPane extends VBox {
         // Update slider range to match display
         thresholdSlider.setMin(clipMin);
         thresholdSlider.setMax(clipMax);
+
+        updatePopulationCounts();
     }
 
     private double percentile(double[] sorted, double pct) {
@@ -381,6 +410,52 @@ public class GateEditorPane extends VBox {
         if (onNodeChanged != null && currentNode != null) {
             onNodeChanged.accept(currentNode);
         }
+    }
+
+    private void applyThresholdFromField() {
+        if (suppressEvents || currentNode == null) return;
+        try {
+            double val = Double.parseDouble(thresholdValueField.getText().trim());
+            suppressEvents = true;
+            currentNode.setThreshold(val);
+            thresholdSlider.setValue(val);
+            histogram.setThreshold(val);
+            suppressEvents = false;
+            fireNodeChanged();
+            updatePopulationCounts();
+        } catch (NumberFormatException ex) {
+            // Revert to current value on bad input
+            thresholdValueField.setText(String.format("%.4f", currentNode.getThreshold()));
+        }
+    }
+
+    /**
+     * Refresh the population counts label from the current GateNode.
+     */
+    public void updatePopulationCounts() {
+        if (currentNode == null) {
+            populationCountsLabel.setText("Positive: -- | Negative: --");
+            return;
+        }
+        int pos = currentNode.getPosCount();
+        int neg = currentNode.getNegCount();
+        int total = pos + neg;
+        if (total > 0) {
+            double posPct = 100.0 * pos / total;
+            double negPct = 100.0 * neg / total;
+            populationCountsLabel.setText(String.format(
+                "Positive: %,d (%.1f%%) | Negative: %,d (%.1f%%)",
+                pos, posPct, neg, negPct));
+        } else {
+            populationCountsLabel.setText("Positive: 0 (0.0%) | Negative: 0 (0.0%)");
+        }
+    }
+
+    private static Label createSectionHeader(String text) {
+        Label header = new Label(text);
+        header.setStyle("-fx-text-fill: #888888; -fx-font-size: 10; -fx-font-weight: bold;");
+        header.setPadding(new Insets(4, 0, 0, 0));
+        return header;
     }
 
     static int colorToInt(Color c) {

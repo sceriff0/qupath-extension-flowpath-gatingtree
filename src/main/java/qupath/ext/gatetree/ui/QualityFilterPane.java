@@ -1,6 +1,7 @@
 package qupath.ext.gatetree.ui;
 
 import javafx.geometry.Insets;
+import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.Slider;
@@ -107,6 +108,13 @@ public class QualityFilterPane extends TitledPane {
         filteredCountLabel = new Label("Filtered: 0 / 0 cells");
         filteredCountLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #ff9900;");
         grid.add(filteredCountLabel, 0, row, 3, 1);
+        row++;
+
+        // Reset button
+        Button resetBtn = new Button("Reset Filters");
+        resetBtn.setMaxWidth(Double.MAX_VALUE);
+        resetBtn.setOnAction(e -> resetToDefaults());
+        grid.add(resetBtn, 0, row, 3, 1);
 
         setContent(grid);
 
@@ -214,7 +222,56 @@ public class QualityFilterPane extends TitledPane {
         return filter;
     }
 
+    /**
+     * Reset all filter sliders to their default (no-op) values.
+     */
+    public void resetToDefaults() {
+        suppressEvents = true;
+        areaMinSlider.setValue(0);
+        areaMinLabel.setText(fmt(0));
+        filter.setMinArea(0);
+
+        areaMaxSlider.setValue(areaMaxSlider.getMax());
+        areaMaxLabel.setText("off");
+        filter.setMaxArea(Double.MAX_VALUE);
+
+        totalIntensitySlider.setValue(0);
+        totalIntLabel.setText(fmt(0));
+        filter.setMinTotalIntensity(0);
+
+        eccentricitySlider.setValue(1.0);
+        eccentLabel.setText(fmt(1.0));
+        filter.setMaxEccentricity(1.0);
+
+        soliditySlider.setValue(0.0);
+        solidLabel.setText(fmt(0.0));
+        filter.setMinSolidity(0.0);
+
+        suppressEvents = false;
+        updateActiveIndicator();
+        fireChanged();
+    }
+
+    /**
+     * Update the TitledPane text and color depending on whether any filter is active.
+     */
+    private void updateActiveIndicator() {
+        boolean active = filter.getMinArea() > 0
+                || filter.getMaxArea() != Double.MAX_VALUE
+                || filter.getMinTotalIntensity() > 0
+                || filter.getMaxEccentricity() < 1.0
+                || filter.getMinSolidity() > 0.0;
+        if (active) {
+            setText("Quality Filter (active)");
+            setStyle("-fx-text-fill: #ff9900;");
+        } else {
+            setText("Quality Filter");
+            setStyle("");
+        }
+    }
+
     private void fireChanged() {
+        updateActiveIndicator();
         if (onFilterChanged != null) {
             onFilterChanged.accept(filter);
         }

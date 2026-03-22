@@ -4,6 +4,7 @@ import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Orientation;
 import javafx.scene.control.*;
+import javafx.scene.input.KeyCode;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -34,6 +35,7 @@ public class GateTreePane extends BorderPane {
     private final GateEditorPane editorPane;
     private final QualityFilterPane qualityFilterPane;
     private final LivePreviewService previewService;
+    private final Label statusBar;
 
     private GateTree gateTree;
     private CellIndex cellIndex;
@@ -51,6 +53,12 @@ public class GateTreePane extends BorderPane {
         treeView.setShowRoot(false);
         treeView.setRoot(new TreeItem<>("Root"));
         treeView.getSelectionModel().selectedItemProperty().addListener((obs, old, sel) -> onTreeSelectionChanged(sel));
+        treeView.setOnKeyPressed(e -> {
+            if (e.getCode() == KeyCode.DELETE || e.getCode() == KeyCode.BACK_SPACE) {
+                removeSelectedGate();
+                e.consume();
+            }
+        });
 
         // Add root gate button
         Button addRootBtn = new Button("+ Add Root Gate");
@@ -81,6 +89,10 @@ public class GateTreePane extends BorderPane {
         splitPane.setDividerPositions(0.4);
         setCenter(splitPane);
 
+        // --- Status bar ---
+        statusBar = new Label("Total: 0 cells | Excluded: 0 | Gates: 0");
+        statusBar.setStyle("-fx-font-size: 11; -fx-text-fill: #aaaaaa; -fx-padding: 2 6 2 6;");
+
         // --- Bottom toolbar ---
         Button saveBtn = new Button("Save JSON");
         saveBtn.setOnAction(e -> saveTree());
@@ -91,7 +103,9 @@ public class GateTreePane extends BorderPane {
 
         HBox toolbar = new HBox(8, saveBtn, loadBtn, new Separator(Orientation.VERTICAL), exportBtn);
         toolbar.setPadding(new Insets(6));
-        setBottom(toolbar);
+
+        VBox bottomBox = new VBox(statusBar, toolbar);
+        setBottom(bottomBox);
 
         // Style
         setStyle("-fx-background-color: #1e1e1e;");
@@ -162,6 +176,8 @@ public class GateTreePane extends BorderPane {
             editorPane.setMarkerStats(previewService.getMarkerStats());
             updateFilteredCount();
         });
+
+        updateStatusBar();
     }
 
     /**
@@ -381,10 +397,32 @@ public class GateTreePane extends BorderPane {
     }
 
     private void onPreviewUpdated() {
-        // Refresh tree cell counts
+        // Refresh tree cell counts and status bar
         Platform.runLater(() -> {
             treeView.refresh();
+            updateStatusBar();
         });
+    }
+
+    private void updateStatusBar() {
+        int total = cellIndex != null ? cellIndex.size() : 0;
+        int excluded = 0;
+        if (cellIndex != null) {
+            boolean[] mask = GatingEngine.computeQualityMask(cellIndex, gateTree.getQualityFilter());
+            for (boolean b : mask) if (!b) excluded++;
+        }
+        int gateCount = countGates(gateTree.getRoots());
+        statusBar.setText(String.format("Total: %,d cells | Excluded: %,d | Gates: %d", total, excluded, gateCount));
+    }
+
+    private int countGates(List<GateNode> nodes) {
+        int count = 0;
+        for (GateNode node : nodes) {
+            count++;
+            count += countGates(node.getPositiveChildren());
+            count += countGates(node.getNegativeChildren());
+        }
+        return count;
     }
 
     // --- IO ---

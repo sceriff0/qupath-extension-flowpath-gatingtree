@@ -30,6 +30,9 @@ public class HistogramCanvas extends Canvas {
     private Color negColor = Color.rgb(160, 160, 160);
     private double maxCount;
 
+    private int posCount = -1;
+    private int negCount = -1;
+
     private boolean dragging = false;
     private DoubleConsumer onThresholdChanged;
     private DoubleConsumer onMouseHover;
@@ -123,6 +126,16 @@ public class HistogramCanvas extends Canvas {
         this.onThresholdChanged = callback;
     }
 
+    public void setPosCount(int count) {
+        this.posCount = count;
+        repaint();
+    }
+
+    public void setNegCount(int count) {
+        this.negCount = count;
+        repaint();
+    }
+
     public void setOnMouseHover(DoubleConsumer callback) {
         this.onMouseHover = callback;
     }
@@ -174,6 +187,23 @@ public class HistogramCanvas extends Canvas {
             gc.setFont(Font.font(10));
             String label = String.format("%.3f", threshold);
             gc.fillText(label, threshX + 3, PADDING_TOP + 12);
+        }
+
+        // Draw pos/neg count annotations above the histogram
+        if (!Double.isNaN(threshold) && threshold >= displayMin && threshold <= displayMax) {
+            double threshX = PADDING_LEFT + ((threshold - displayMin) / (displayMax - displayMin)) * plotW;
+            gc.setFont(Font.font(10));
+            if (negCount >= 0) {
+                gc.setFill(Color.gray(0.8));
+                String negLabel = String.format("Neg: %,d", negCount);
+                gc.fillText(negLabel, PADDING_LEFT + 4, PADDING_TOP - 2);
+            }
+            if (posCount >= 0) {
+                gc.setFill(posColor.brighter());
+                String posLabel = String.format("Pos: %,d", posCount);
+                double posLabelWidth = posLabel.length() * 6.0;
+                gc.fillText(posLabel, w - PADDING_RIGHT - posLabelWidth, PADDING_TOP - 2);
+            }
         }
 
         // Draw axes labels

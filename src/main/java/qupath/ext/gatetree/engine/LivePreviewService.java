@@ -173,13 +173,18 @@ public class LivePreviewService {
             classCache.put(entry.getKey(), pc);
         }
 
+        // Near-invisible PathClass for excluded cells (avoids red "Unclassified" default)
+        int excludedColor = ColorTools.packRGB(20, 20, 20);
+        PathClass excludedClass = PathClass.fromString("Excluded", excludedColor);
+        excludedClass.setColor(excludedColor);
+
         for (int i = 0; i < n; i++) {
             PathObject obj = index.getObject(i);
             if (obj == null) {
                 continue;
             }
             if (excluded[i]) {
-                obj.setPathClass(null);
+                obj.setPathClass(excludedClass);
             } else {
                 obj.setPathClass(classCache.get(phenotypes[i]));
             }
