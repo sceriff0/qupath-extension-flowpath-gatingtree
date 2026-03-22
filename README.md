@@ -46,7 +46,7 @@ Designed for multiplexed imaging data (e.g., CODEX, MIBI, mIF) where cell detect
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/qupath-extension-gatetree.git
+git clone https://github.com/sceriff0/qupath-extension-gatetree.git
 cd qupath-extension-gatetree
 
 # Build (requires Java 25+)
