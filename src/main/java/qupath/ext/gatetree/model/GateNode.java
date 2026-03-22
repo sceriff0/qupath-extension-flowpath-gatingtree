@@ -14,7 +14,7 @@ public class GateNode {
     private int negativeColor = (128 << 16) | (128 << 8) | 128; // gray
     private double clipPercentileLow = 1.0;
     private double clipPercentileHigh = 99.0;
-    private boolean excludeOutliers = false;
+    private boolean hideOutliers = false;
     private List<GateNode> positiveChildren = new ArrayList<>();
     private List<GateNode> negativeChildren = new ArrayList<>();
 
@@ -108,12 +108,12 @@ public class GateNode {
         this.clipPercentileHigh = clipPercentileHigh;
     }
 
-    public boolean isExcludeOutliers() {
-        return excludeOutliers;
+    public boolean isHideOutliers() {
+        return hideOutliers;
     }
 
-    public void setExcludeOutliers(boolean excludeOutliers) {
-        this.excludeOutliers = excludeOutliers;
+    public void setHideOutliers(boolean hideOutliers) {
+        this.hideOutliers = hideOutliers;
     }
 
     public List<GateNode> getPositiveChildren() {
@@ -150,6 +150,41 @@ public class GateNode {
 
     public boolean isLeaf() {
         return positiveChildren.isEmpty() && negativeChildren.isEmpty();
+    }
+
+    /**
+     * Create a deep copy of this node and all descendants.
+     * Transient counts are not copied (they belong to the engine run).
+     */
+    public GateNode deepCopy() {
+        GateNode copy = new GateNode();
+        copy.channel = this.channel;
+        copy.threshold = this.threshold;
+        copy.thresholdIsZScore = this.thresholdIsZScore;
+        copy.positiveName = this.positiveName;
+        copy.negativeName = this.negativeName;
+        copy.positiveColor = this.positiveColor;
+        copy.negativeColor = this.negativeColor;
+        copy.clipPercentileLow = this.clipPercentileLow;
+        copy.clipPercentileHigh = this.clipPercentileHigh;
+        copy.hideOutliers = this.hideOutliers;
+        copy.positiveChildren = new ArrayList<>();
+        for (GateNode child : this.positiveChildren) {
+            copy.positiveChildren.add(child.deepCopy());
+        }
+        copy.negativeChildren = new ArrayList<>();
+        for (GateNode child : this.negativeChildren) {
+            copy.negativeChildren.add(child.deepCopy());
+        }
+        return copy;
+    }
+
+    /**
+     * Copy transient counts from another node into this one.
+     */
+    public void transferCountsFrom(GateNode source) {
+        this.posCount = source.posCount;
+        this.negCount = source.negCount;
     }
 
     public void collectLeafNames(List<String> out) {

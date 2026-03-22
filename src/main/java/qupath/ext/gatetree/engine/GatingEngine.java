@@ -148,7 +148,7 @@ public final class GatingEngine {
         double rawValue = index.getMarkerValues(markerIdx)[cellIdx];
 
         // Outlier exclusion based on percentile clip bounds
-        if (node.isExcludeOutliers()) {
+        if (node.isHideOutliers()) {
             double lo = stats.getPercentileValue(channel, node.getClipPercentileLow());
             double hi = stats.getPercentileValue(channel, node.getClipPercentileHigh());
             if (rawValue < lo || rawValue > hi) {
@@ -162,31 +162,27 @@ public final class GatingEngine {
 
         if (compareValue >= threshold) {
             node.setPosCount(node.getPosCount() + 1);
-            List<GateNode> children = node.getPositiveChildren();
-            if (children == null || children.isEmpty()) {
-                phenotypes[cellIdx] = node.getPositiveName();
-                colors[cellIdx] = node.getPositiveColor();
-            } else {
-                phenotypes[cellIdx] = node.getPositiveName();
-                colors[cellIdx] = node.getPositiveColor();
-                for (GateNode child : children) {
-                    if (excluded[cellIdx]) return;
-                    walkNode(child, cellIdx, index, stats, useZScore, phenotypes, excluded, colors);
-                }
-            }
+            assignBranch(node.getPositiveName(), node.getPositiveColor(),
+                    node.getPositiveChildren(), cellIdx, index, stats,
+                    useZScore, phenotypes, excluded, colors);
         } else {
             node.setNegCount(node.getNegCount() + 1);
-            List<GateNode> children = node.getNegativeChildren();
-            if (children == null || children.isEmpty()) {
-                phenotypes[cellIdx] = node.getNegativeName();
-                colors[cellIdx] = node.getNegativeColor();
-            } else {
-                phenotypes[cellIdx] = node.getNegativeName();
-                colors[cellIdx] = node.getNegativeColor();
-                for (GateNode child : children) {
-                    if (excluded[cellIdx]) return;
-                    walkNode(child, cellIdx, index, stats, useZScore, phenotypes, excluded, colors);
-                }
+            assignBranch(node.getNegativeName(), node.getNegativeColor(),
+                    node.getNegativeChildren(), cellIdx, index, stats,
+                    useZScore, phenotypes, excluded, colors);
+        }
+    }
+
+    private static void assignBranch(String name, int color, List<GateNode> children,
+                                      int cellIdx, CellIndex index, MarkerStats stats,
+                                      boolean useZScore, String[] phenotypes,
+                                      boolean[] excluded, int[] colors) {
+        phenotypes[cellIdx] = name;
+        colors[cellIdx] = color;
+        if (children != null && !children.isEmpty()) {
+            for (GateNode child : children) {
+                if (excluded[cellIdx]) return;
+                walkNode(child, cellIdx, index, stats, useZScore, phenotypes, excluded, colors);
             }
         }
     }

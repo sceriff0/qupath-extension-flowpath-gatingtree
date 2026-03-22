@@ -41,6 +41,7 @@ public class GateTreePane extends BorderPane {
     private CellIndex cellIndex;
     private MarkerStats markerStats;
     private List<String> markerNames;
+    private boolean[] cachedQualityMask;
 
     public GateTreePane(QuPathGUI qupath) {
         this.qupath = qupath;
@@ -144,8 +145,8 @@ public class GateTreePane extends BorderPane {
         cellIndex = CellIndex.build(detections, markerNames);
 
         // Compute quality mask and stats
-        boolean[] qualityMask = GatingEngine.computeQualityMask(cellIndex, gateTree.getQualityFilter());
-        markerStats = MarkerStats.compute(cellIndex, qualityMask);
+        recomputeQualityMask();
+        markerStats = MarkerStats.compute(cellIndex, cachedQualityMask);
 
         // Update UI
         editorPane.setChannelNames(markerNames);
@@ -174,6 +175,7 @@ public class GateTreePane extends BorderPane {
         previewService.setOnUpdateComplete(this::onPreviewUpdated);
         previewService.setOnStatsRecomputed(() -> {
             editorPane.setMarkerStats(previewService.getMarkerStats());
+            recomputeQualityMask();
             updateFilteredCount();
         });
 
@@ -377,16 +379,24 @@ public class GateTreePane extends BorderPane {
 
     private void onQualityFilterChanged() {
         if (cellIndex == null) return;
+        recomputeQualityMask();
         // Recompute stats on background thread, then trigger preview update
         previewService.recomputeStats();
         updateFilteredCount();
     }
 
+    private void recomputeQualityMask() {
+        if (cellIndex == null) {
+            cachedQualityMask = null;
+            return;
+        }
+        cachedQualityMask = GatingEngine.computeQualityMask(cellIndex, gateTree.getQualityFilter());
+    }
+
     private void updateFilteredCount() {
-        if (cellIndex == null) return;
-        boolean[] mask = GatingEngine.computeQualityMask(cellIndex, gateTree.getQualityFilter());
+        if (cellIndex == null || cachedQualityMask == null) return;
         int passing = 0;
-        for (boolean b : mask) if (b) passing++;
+        for (boolean b : cachedQualityMask) if (b) passing++;
         int filtered = cellIndex.size() - passing;
         qualityFilterPane.setFilteredCount(filtered, cellIndex.size());
     }
@@ -407,9 +417,8 @@ public class GateTreePane extends BorderPane {
     private void updateStatusBar() {
         int total = cellIndex != null ? cellIndex.size() : 0;
         int excluded = 0;
-        if (cellIndex != null) {
-            boolean[] mask = GatingEngine.computeQualityMask(cellIndex, gateTree.getQualityFilter());
-            for (boolean b : mask) if (!b) excluded++;
+        if (cachedQualityMask != null) {
+            for (boolean b : cachedQualityMask) if (!b) excluded++;
         }
         int gateCount = countGates(gateTree.getRoots());
         statusBar.setText(String.format("Total: %,d cells | Excluded: %,d | Gates: %d", total, excluded, gateCount));

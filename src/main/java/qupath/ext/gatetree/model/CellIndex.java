@@ -15,11 +15,13 @@ public class CellIndex {
     private final double[] eccentricities;
     private final double[] solidities;
     private final double[] totalIntensities;
+    private final double[] centroidX;
+    private final double[] centroidY;
     private final int size;
 
     private CellIndex(PathObject[] objects, String[] markerNames, double[][] values,
                       double[] areas, double[] eccentricities, double[] solidities,
-                      double[] totalIntensities) {
+                      double[] totalIntensities, double[] centroidX, double[] centroidY) {
         this.objects = objects;
         this.markerNames = markerNames;
         this.values = values;
@@ -27,6 +29,8 @@ public class CellIndex {
         this.eccentricities = eccentricities;
         this.solidities = solidities;
         this.totalIntensities = totalIntensities;
+        this.centroidX = centroidX;
+        this.centroidY = centroidY;
         this.size = objects.length;
     }
 
@@ -41,6 +45,8 @@ public class CellIndex {
         double[] eccentricities = new double[n];
         double[] solidities = new double[n];
         double[] totalIntensities = new double[n];
+        double[] centroidX = new double[n];
+        double[] centroidY = new double[n];
 
         int i = 0;
         for (PathObject obj : objects) {
@@ -54,6 +60,10 @@ public class CellIndex {
             eccentricities[i] = eccentricity;
             solidities[i] = (convexArea > 0) ? area / convexArea : 1.0;
 
+            // Spatial coordinates
+            centroidX[i] = findMeasurement(measurements, "Centroid X µm");
+            centroidY[i] = findMeasurement(measurements, "Centroid Y µm");
+
             double totalIntensity = 0;
             for (int j = 0; j < m; j++) {
                 double v = findMarkerValue(measurements, markers[j]);
@@ -65,7 +75,8 @@ public class CellIndex {
             i++;
         }
 
-        return new CellIndex(objects, markers, values, areas, eccentricities, solidities, totalIntensities);
+        return new CellIndex(objects, markers, values, areas, eccentricities, solidities,
+                totalIntensities, centroidX, centroidY);
     }
 
     private static Map<String, Number> getMeasurements(PathObject obj) {
@@ -99,7 +110,7 @@ public class CellIndex {
 
     /**
      * Find a morphological measurement by key name.
-     * Uses case-insensitive partial matching for flexibility.
+     * Tries exact match, then layer-prefixed pattern "[layer] key".
      */
     private static double findMeasurement(Map<String, Number> measurements, String key) {
         Number val = measurements.get(key);
@@ -113,13 +124,6 @@ public class CellIndex {
             }
         }
 
-        // Case-insensitive partial match
-        String keyLower = key.toLowerCase();
-        for (Map.Entry<String, Number> entry : measurements.entrySet()) {
-            if (entry.getKey().toLowerCase().contains(keyLower) && entry.getValue() != null) {
-                return entry.getValue().doubleValue();
-            }
-        }
         return 0.0;
     }
 
@@ -185,5 +189,13 @@ public class CellIndex {
 
     public double getTotalIntensity(int i) {
         return totalIntensities[i];
+    }
+
+    public double getCentroidX(int i) {
+        return centroidX[i];
+    }
+
+    public double getCentroidY(int i) {
+        return centroidY[i];
     }
 }

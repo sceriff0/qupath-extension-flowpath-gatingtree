@@ -6,6 +6,7 @@ import javafx.util.Duration;
 import qupath.ext.gatetree.model.CellIndex;
 import qupath.ext.gatetree.model.GateTree;
 import qupath.ext.gatetree.model.MarkerStats;
+import qupath.ext.gatetree.model.ColorUtils;
 import qupath.lib.common.ColorTools;
 import qupath.lib.images.ImageData;
 import qupath.lib.objects.PathObject;
@@ -132,20 +133,27 @@ public class LivePreviewService {
     private void submitGatingWork() {
         if (executor.isShutdown()) return;
         // Capture references to avoid races
-        final GateTree tree = this.gateTree;
+        final GateTree originalTree = this.gateTree;
         final CellIndex index = this.cellIndex;
         final MarkerStats stats = this.markerStats;
         final boolean zScore = this.useZScore;
         final ImageData<?> data = this.imageData;
 
-        if (tree == null || index == null || stats == null || data == null) {
+        if (originalTree == null || index == null || stats == null || data == null) {
             return;
         }
+
+        // Deep-copy the tree so the background thread works on an immutable snapshot
+        final GateTree tree = originalTree.deepCopy();
 
         executor.submit(() -> {
             GatingEngine.AssignmentResult result = GatingEngine.assignAll(tree, index, stats, zScore);
 
-            Platform.runLater(() -> applyResult(result, index, data));
+            Platform.runLater(() -> {
+                // Transfer counts from the snapshot back to the live tree for UI display
+                GateTree.transferCounts(originalTree.getRoots(), tree.getRoots());
+                applyResult(result, index, data);
+            });
         });
     }
 
@@ -167,8 +175,7 @@ public class LivePreviewService {
         }
         for (var entry : colorByName.entrySet()) {
             int packed = entry.getValue();
-            int qupathColor = ColorTools.packRGB(
-                ColorTools.red(packed), ColorTools.green(packed), ColorTools.blue(packed));
+            int qupathColor = ColorUtils.toQuPathColor(packed);
             PathClass pc = PathClass.fromString(entry.getKey(), qupathColor);
             pc.setColor(qupathColor);  // Force-update cached PathClass color
             classCache.put(entry.getKey(), pc);

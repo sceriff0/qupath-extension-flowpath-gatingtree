@@ -58,7 +58,7 @@ public class PhenotypeCsvExporter {
 
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(file))) {
             // Write header
-            writer.write("cell_id,phenotype");
+            writer.write("cell_id,phenotype,centroid_x,centroid_y,area");
             for (String marker : markerColumns) {
                 writer.write(',');
                 writer.write(escapeCsv(marker));
@@ -72,13 +72,17 @@ public class PhenotypeCsvExporter {
                     continue;
                 }
 
-                // Cell ID: use object display name if available, otherwise index
-                String cellId = getCellId(index, i);
                 String phenotype = phenotypes[i] != null ? phenotypes[i] : "";
 
-                writer.write(escapeCsv(cellId));
+                writer.write(String.valueOf(i));
                 writer.write(',');
                 writer.write(escapeCsv(phenotype));
+                writer.write(',');
+                writer.write(String.format("%.4f", index.getCentroidX(i)));
+                writer.write(',');
+                writer.write(String.format("%.4f", index.getCentroidY(i)));
+                writer.write(',');
+                writer.write(String.format("%.4f", index.getArea(i)));
 
                 // Look up marker signs for this phenotype
                 Map<String, String> signs = phenotypeMarkerSigns.get(phenotype);
@@ -88,7 +92,6 @@ public class PhenotypeCsvExporter {
                     if (signs != null && signs.containsKey(marker)) {
                         writer.write(signs.get(marker));
                     }
-                    // If the marker wasn't in the path for this phenotype, leave blank
                 }
                 writer.newLine();
             }
@@ -156,22 +159,6 @@ public class PhenotypeCsvExporter {
                 traceMarkerSigns(child, negativePath, result);
             }
         }
-    }
-
-    /**
-     * Get a human-readable cell identifier. Uses the PathObject display name
-     * if available, otherwise falls back to the cell index.
-     */
-    private static String getCellId(CellIndex index, int i) {
-        try {
-            String name = index.getObject(i).getDisplayedName();
-            if (name != null && !name.isEmpty()) {
-                return name;
-            }
-        } catch (Exception ignored) {
-            // fall through
-        }
-        return String.valueOf(i);
     }
 
     /**

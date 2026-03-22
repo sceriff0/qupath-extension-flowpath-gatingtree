@@ -6,6 +6,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import qupath.ext.gatetree.model.ColorUtils;
 import qupath.ext.gatetree.model.GateNode;
 import qupath.ext.gatetree.model.GateTree;
 import qupath.ext.gatetree.model.QualityFilter;
@@ -136,11 +137,11 @@ public class GateTreeSerializer {
         obj.addProperty("thresholdIsZScore", node.isThresholdIsZScore());
         obj.addProperty("positiveName", node.getPositiveName());
         obj.addProperty("negativeName", node.getNegativeName());
-        obj.add("positiveColor", packColorToArray(node.getPositiveColor()));
-        obj.add("negativeColor", packColorToArray(node.getNegativeColor()));
+        obj.add("positiveColor", ColorUtils.toJsonArray(node.getPositiveColor()));
+        obj.add("negativeColor", ColorUtils.toJsonArray(node.getNegativeColor()));
         obj.addProperty("clipPercentileLow", node.getClipPercentileLow());
         obj.addProperty("clipPercentileHigh", node.getClipPercentileHigh());
-        obj.addProperty("excludeOutliers", node.isExcludeOutliers());
+        obj.addProperty("hideOutliers", node.isHideOutliers());
         obj.add("positiveChildren", serializeNodeList(node.getPositiveChildren()));
         obj.add("negativeChildren", serializeNodeList(node.getNegativeChildren()));
         return obj;
@@ -168,15 +169,17 @@ public class GateTreeSerializer {
         if (obj.has("negativeName"))
             node.setNegativeName(obj.get("negativeName").getAsString());
         if (obj.has("positiveColor"))
-            node.setPositiveColor(arrayToPackedColor(obj.getAsJsonArray("positiveColor")));
+            node.setPositiveColor(ColorUtils.fromJsonArray(obj.getAsJsonArray("positiveColor")));
         if (obj.has("negativeColor"))
-            node.setNegativeColor(arrayToPackedColor(obj.getAsJsonArray("negativeColor")));
+            node.setNegativeColor(ColorUtils.fromJsonArray(obj.getAsJsonArray("negativeColor")));
         if (obj.has("clipPercentileLow"))
             node.setClipPercentileLow(obj.get("clipPercentileLow").getAsDouble());
         if (obj.has("clipPercentileHigh"))
             node.setClipPercentileHigh(obj.get("clipPercentileHigh").getAsDouble());
-        if (obj.has("excludeOutliers"))
-            node.setExcludeOutliers(obj.get("excludeOutliers").getAsBoolean());
+        if (obj.has("hideOutliers"))
+            node.setHideOutliers(obj.get("hideOutliers").getAsBoolean());
+        else if (obj.has("excludeOutliers"))
+            node.setHideOutliers(obj.get("excludeOutliers").getAsBoolean());
         if (obj.has("positiveChildren"))
             node.setPositiveChildren(deserializeNodeList(obj.getAsJsonArray("positiveChildren")));
         if (obj.has("negativeChildren"))
@@ -185,27 +188,4 @@ public class GateTreeSerializer {
         return node;
     }
 
-    // -----------------------------------------------------------------------
-    //  Color conversion: packed int <-> [R, G, B] JSON array
-    // -----------------------------------------------------------------------
-
-    private static JsonArray packColorToArray(int color) {
-        int r = (color >> 16) & 0xFF;
-        int g = (color >> 8) & 0xFF;
-        int b = color & 0xFF;
-        JsonArray arr = new JsonArray();
-        arr.add(r);
-        arr.add(g);
-        arr.add(b);
-        return arr;
-    }
-
-    private static int arrayToPackedColor(JsonArray arr) {
-        if (arr == null || arr.size() < 3)
-            return 0xFF808080; // default gray
-        int r = arr.get(0).getAsInt();
-        int g = arr.get(1).getAsInt();
-        int b = arr.get(2).getAsInt();
-        return (r << 16) | (g << 8) | b;
-    }
 }

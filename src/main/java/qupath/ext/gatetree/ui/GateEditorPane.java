@@ -8,6 +8,7 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import qupath.ext.gatetree.model.CellIndex;
+import qupath.ext.gatetree.model.ColorUtils;
 import qupath.ext.gatetree.model.GateNode;
 import qupath.ext.gatetree.model.MarkerStats;
 
@@ -35,7 +36,7 @@ public class GateEditorPane extends VBox {
     private final ColorPicker negColorPicker;
     private final Spinner<Double> clipLowSpinner;
     private final Spinner<Double> clipHighSpinner;
-    private final CheckBox excludeOutliersBox;
+    private final CheckBox hideOutliersBox;
     private final Label hoverLabel;
 
     private final Button addToPosBtn;
@@ -138,8 +139,8 @@ public class GateEditorPane extends VBox {
         clipHighSpinner = new Spinner<>(50.0, 100.0, 99.0, 0.5);
         clipHighSpinner.setPrefWidth(75);
         clipHighSpinner.setEditable(true);
-        excludeOutliersBox = new CheckBox("Exclude outliers");
-        excludeOutliersBox.setStyle("-fx-text-fill: white;");
+        hideOutliersBox = new CheckBox("Hide outliers");
+        hideOutliersBox.setStyle("-fx-text-fill: white;");
 
         clipLowSpinner.valueProperty().addListener((obs, old, val) -> {
             if (!suppressEvents && currentNode != null) {
@@ -155,9 +156,9 @@ public class GateEditorPane extends VBox {
                 fireNodeChanged();
             }
         });
-        excludeOutliersBox.selectedProperty().addListener((obs, old, val) -> {
+        hideOutliersBox.selectedProperty().addListener((obs, old, val) -> {
             if (!suppressEvents && currentNode != null) {
-                currentNode.setExcludeOutliers(val);
+                currentNode.setHideOutliers(val);
                 fireNodeChanged();
             }
         });
@@ -166,7 +167,7 @@ public class GateEditorPane extends VBox {
             new Label("Clip:") {{ setStyle("-fx-text-fill: white;"); }},
             clipLowSpinner, new Label("% to") {{ setStyle("-fx-text-fill: white;"); }},
             clipHighSpinner, new Label("%") {{ setStyle("-fx-text-fill: white;"); }},
-            excludeOutliersBox);
+            hideOutliersBox);
 
         // Population Names section header
         Label namesHeader = createSectionHeader("Population Names");
@@ -212,14 +213,14 @@ public class GateEditorPane extends VBox {
         });
         posColorPicker.valueProperty().addListener((obs, old, val) -> {
             if (!suppressEvents && currentNode != null) {
-                currentNode.setPositiveColor(colorToInt(val));
+                currentNode.setPositiveColor(ColorUtils.colorToInt(val));
                 histogram.setPosColor(val);
                 fireNodeChanged();
             }
         });
         negColorPicker.valueProperty().addListener((obs, old, val) -> {
             if (!suppressEvents && currentNode != null) {
-                currentNode.setNegativeColor(colorToInt(val));
+                currentNode.setNegativeColor(ColorUtils.colorToInt(val));
                 histogram.setNegColor(val);
                 fireNodeChanged();
             }
@@ -284,39 +285,30 @@ public class GateEditorPane extends VBox {
      */
     public void setGateNode(GateNode node) {
         this.currentNode = node;
-        suppressEvents = true;
-
         if (node == null) {
-            setDisabled(true);
-            suppressEvents = false;
+            withSuppressedEvents(() -> setDisabled(true));
             return;
         }
-
-        setDisabled(false);
-
-        channelCombo.setValue(node.getChannel());
-        if (node.isThresholdIsZScore()) {
-            zscoreModeBtn.setSelected(true);
-        } else {
-            rawModeBtn.setSelected(true);
-        }
-
-        thresholdSlider.setValue(node.getThreshold());
-        thresholdValueField.setText(String.format("%.4f", node.getThreshold()));
-
-        posNameField.setText(node.getPositiveName());
-        negNameField.setText(node.getNegativeName());
-        posColorPicker.setValue(intToColor(node.getPositiveColor()));
-        negColorPicker.setValue(intToColor(node.getNegativeColor()));
-
-        clipLowSpinner.getValueFactory().setValue(node.getClipPercentileLow());
-        clipHighSpinner.getValueFactory().setValue(node.getClipPercentileHigh());
-        excludeOutliersBox.setSelected(node.isExcludeOutliers());
-
-        histogram.setPosColor(intToColor(node.getPositiveColor()));
-        histogram.setNegColor(intToColor(node.getNegativeColor()));
-
-        suppressEvents = false;
+        withSuppressedEvents(() -> {
+            setDisabled(false);
+            channelCombo.setValue(node.getChannel());
+            if (node.isThresholdIsZScore()) {
+                zscoreModeBtn.setSelected(true);
+            } else {
+                rawModeBtn.setSelected(true);
+            }
+            thresholdSlider.setValue(node.getThreshold());
+            thresholdValueField.setText(String.format("%.4f", node.getThreshold()));
+            posNameField.setText(node.getPositiveName());
+            negNameField.setText(node.getNegativeName());
+            posColorPicker.setValue(ColorUtils.intToColor(node.getPositiveColor()));
+            negColorPicker.setValue(ColorUtils.intToColor(node.getNegativeColor()));
+            clipLowSpinner.getValueFactory().setValue(node.getClipPercentileLow());
+            clipHighSpinner.getValueFactory().setValue(node.getClipPercentileHigh());
+            hideOutliersBox.setSelected(node.isHideOutliers());
+            histogram.setPosColor(ColorUtils.intToColor(node.getPositiveColor()));
+            histogram.setNegColor(ColorUtils.intToColor(node.getNegativeColor()));
+        });
         updateHistogram();
     }
 
@@ -406,6 +398,15 @@ public class GateEditorPane extends VBox {
         return sorted[lo] * (1 - frac) + sorted[hi] * frac;
     }
 
+    private void withSuppressedEvents(Runnable action) {
+        suppressEvents = true;
+        try {
+            action.run();
+        } finally {
+            suppressEvents = false;
+        }
+    }
+
     private void fireNodeChanged() {
         if (onNodeChanged != null && currentNode != null) {
             onNodeChanged.accept(currentNode);
@@ -416,15 +417,14 @@ public class GateEditorPane extends VBox {
         if (suppressEvents || currentNode == null) return;
         try {
             double val = Double.parseDouble(thresholdValueField.getText().trim());
-            suppressEvents = true;
-            currentNode.setThreshold(val);
-            thresholdSlider.setValue(val);
-            histogram.setThreshold(val);
-            suppressEvents = false;
+            withSuppressedEvents(() -> {
+                currentNode.setThreshold(val);
+                thresholdSlider.setValue(val);
+                histogram.setThreshold(val);
+            });
             fireNodeChanged();
             updatePopulationCounts();
         } catch (NumberFormatException ex) {
-            // Revert to current value on bad input
             thresholdValueField.setText(String.format("%.4f", currentNode.getThreshold()));
         }
     }
@@ -458,17 +458,4 @@ public class GateEditorPane extends VBox {
         return header;
     }
 
-    static int colorToInt(Color c) {
-        int r = (int) (c.getRed() * 255);
-        int g = (int) (c.getGreen() * 255);
-        int b = (int) (c.getBlue() * 255);
-        return (r << 16) | (g << 8) | b;
-    }
-
-    static Color intToColor(int packed) {
-        int r = (packed >> 16) & 0xFF;
-        int g = (packed >> 8) & 0xFF;
-        int b = packed & 0xFF;
-        return Color.rgb(r, g, b);
-    }
 }
