@@ -13,6 +13,7 @@ import javafx.scene.layout.Region;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
+import qupath.ext.gatetree.model.ColorUtils;
 import qupath.ext.gatetree.model.GateNode;
 
 /**
@@ -107,7 +108,7 @@ public class GateTreeCell extends TreeCell<Object> {
         boolean isPos = branch.isPositive;
 
         int colorInt = isPos ? gate.getPositiveColor() : gate.getNegativeColor();
-        Color pillColor = GateEditorPane.intToColor(colorInt);
+        Color pillColor = ColorUtils.intToColor(colorInt);
         String name = isPos ? gate.getPositiveName() : gate.getNegativeName();
         int count = isPos ? gate.getPosCount() : gate.getNegCount();
         boolean isLeaf = isPos ? gate.getPositiveChildren().isEmpty() : gate.getNegativeChildren().isEmpty();
