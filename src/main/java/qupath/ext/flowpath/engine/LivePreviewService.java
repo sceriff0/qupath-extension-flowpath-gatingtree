@@ -39,6 +39,9 @@ public class LivePreviewService {
     /** Optional callback fired after MarkerStats is recomputed (e.g., to refresh UI sliders). */
     private Runnable onStatsRecomputed;
 
+    /** Optional callback fired when gating computation starts (e.g., to show a spinner). */
+    private Runnable onUpdateStarted;
+
     /** Optional callback fired after cell classifications are applied (e.g., to refresh tree counts). */
     private Runnable onUpdateComplete;
 
@@ -87,6 +90,10 @@ public class LivePreviewService {
 
     public void setOnStatsRecomputed(Runnable onStatsRecomputed) {
         this.onStatsRecomputed = onStatsRecomputed;
+    }
+
+    public void setOnUpdateStarted(Runnable onUpdateStarted) {
+        this.onUpdateStarted = onUpdateStarted;
     }
 
     public void setOnUpdateComplete(Runnable onUpdateComplete) {
@@ -160,6 +167,10 @@ public class LivePreviewService {
 
         // Deep-copy the tree so the background thread works on an immutable snapshot
         final GateTree tree = originalTree.deepCopy();
+
+        if (onUpdateStarted != null) {
+            Platform.runLater(onUpdateStarted);
+        }
 
         executor.submit(() -> {
             GatingEngine.AssignmentResult result = GatingEngine.assignAll(tree, index, stats, zScore, roi);

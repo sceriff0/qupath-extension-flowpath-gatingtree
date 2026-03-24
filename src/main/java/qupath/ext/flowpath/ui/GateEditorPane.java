@@ -173,14 +173,24 @@ public class GateEditorPane extends VBox {
         // Wire deferred callbacks
         channelCombo.setOnAction(e -> {
             if (!suppressEvents && currentNode != null) {
-                currentNode.setChannel(channelCombo.getValue());
-                String ch = channelCombo.getValue();
-                if (ch != null && currentNode.getBranches().size() >= 2) {
-                    currentNode.getBranches().get(0).setName(ch + "+");
-                    currentNode.getBranches().get(1).setName(ch + "-");
+                String oldChannel = currentNode.getChannel();
+                String newChannel = channelCombo.getValue();
+                currentNode.setChannel(newChannel);
+                // Only auto-rename branches if they still match the old default pattern
+                if (newChannel != null && currentNode.getBranches().size() >= 2) {
+                    Branch pos = currentNode.getBranches().get(0);
+                    Branch neg = currentNode.getBranches().get(1);
+                    if (oldChannel != null && pos.getName().equals(oldChannel + "+")) {
+                        pos.setName(newChannel + "+");
+                    }
+                    if (oldChannel != null && neg.getName().equals(oldChannel + "-")) {
+                        neg.setName(newChannel + "-");
+                    }
                 }
                 updateHistogram();
                 fireNodeChanged();
+                // Refresh branch names in editor
+                buildBranchNamesEditor(currentNode);
             }
         });
         histogram.setOnThresholdChanged(val -> {
@@ -217,6 +227,10 @@ public class GateEditorPane extends VBox {
             withSuppressedEvents(() -> setDisabled(true));
             gateTypeLabel.setText("No gate selected");
             gateSpecificArea.getChildren().clear();
+            Label hint = new Label("Select a gate from the tree to edit it,\nor click '+ Add Root Gate' to create one.");
+            hint.setStyle("-fx-text-fill: #888888; -fx-font-size: 11;");
+            hint.setWrapText(true);
+            gateSpecificArea.getChildren().add(hint);
             branchNamesArea.getChildren().clear();
             actionButtonArea.getChildren().clear();
             return;
@@ -410,8 +424,20 @@ public class GateEditorPane extends VBox {
             Branch branch = branches.get(i);
             int idx = i;
 
-            Label label = new Label("Branch " + (i + 1) + ":");
-            label.setStyle("-fx-text-fill: " + (i == 0 ? "#00cc00" : "#999999") + ";");
+            // Contextual branch label based on gate type and index
+            String labelText;
+            if (node instanceof QuadrantGate) {
+                labelText = new String[]{"Q1 (++):", "Q2 (-+):", "Q3 (+-):", "Q4 (--):"} [Math.min(i, 3)];
+            } else if (node instanceof BooleanGate) {
+                labelText = i == 0 ? "Match:" : "No Match:";
+            } else if (node instanceof PolygonGate || node instanceof RectangleGate || node instanceof EllipseGate) {
+                labelText = i == 0 ? "Inside:" : "Outside:";
+            } else {
+                labelText = i == 0 ? "Positive:" : "Negative:";
+            }
+            Color labelColor = ColorUtils.intToColor(branch.getColor());
+            Label label = new Label(labelText);
+            label.setStyle("-fx-text-fill: " + toWebColor(labelColor) + ";");
 
             TextField nameField = new TextField(branch.getName());
             nameField.setPrefWidth(120);
@@ -576,6 +602,11 @@ public class GateEditorPane extends VBox {
         } catch (NumberFormatException ex) {
             thresholdValueField.setText(String.format("%.4f", currentNode.getThreshold()));
         }
+    }
+
+    private static String toWebColor(Color c) {
+        return String.format("#%02x%02x%02x",
+            (int)(c.getRed() * 255), (int)(c.getGreen() * 255), (int)(c.getBlue() * 255));
     }
 
     private static Label createSectionHeader(String text) {

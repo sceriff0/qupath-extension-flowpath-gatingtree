@@ -161,7 +161,15 @@ public class FlowPathCell extends TreeCell<Object> {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        Label countLabel = new Label(String.format("%,d", count));
+        // Show count with percentage relative to parent gate total
+        int totalParent = 0;
+        for (Branch b : bi.parentGate.getBranches()) {
+            totalParent += b.getCount();
+        }
+        String countText = totalParent > 0
+            ? String.format("%,d (%.1f%%)", count, 100.0 * count / totalParent)
+            : String.format("%,d", count);
+        Label countLabel = new Label(countText);
         countLabel.setFont(Font.font(null, FontWeight.NORMAL, 11));
         countLabel.setTextFill(Color.web("#888888"));
 

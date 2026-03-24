@@ -83,8 +83,13 @@ public class FlowPathPane extends BorderPane {
             if (e.getCode() == KeyCode.DELETE || e.getCode() == KeyCode.BACK_SPACE) {
                 removeSelectedGate();
                 e.consume();
+            } else if (new KeyCodeCombination(KeyCode.D, KeyCombination.SHORTCUT_DOWN).match(e)) {
+                duplicateSelectedGate();
+                e.consume();
             }
         });
+        // Right-click context menu
+        treeView.setOnContextMenuRequested(e -> showTreeContextMenu(e.getScreenX(), e.getScreenY()));
 
         // Add root gate button
         Button addRootBtn = new Button("+ Add Root Gate");
@@ -119,7 +124,17 @@ public class FlowPathPane extends BorderPane {
         qualityFilterPane = new QualityFilterPane(gateTree.getQualityFilter());
         qualityFilterPane.setOnFilterChanged(filter -> onQualityFilterChanged());
 
-        VBox leftPane = new VBox(4, treeView, addRootBtn, roiLabel, roiComboBox, qualityFilterPane);
+        // Expand/Collapse buttons
+        Button expandAllBtn = new Button("\u25BC");
+        expandAllBtn.setTooltip(new Tooltip("Expand all gates"));
+        expandAllBtn.setOnAction(e -> expandAll(treeView.getRoot()));
+        Button collapseAllBtn = new Button("\u25B6");
+        collapseAllBtn.setTooltip(new Tooltip("Collapse all gates"));
+        collapseAllBtn.setOnAction(e -> collapseAll(treeView.getRoot()));
+        HBox treeToolbar = new HBox(4, addRootBtn, expandAllBtn, collapseAllBtn);
+        HBox.setHgrow(addRootBtn, Priority.ALWAYS);
+
+        VBox leftPane = new VBox(4, treeView, treeToolbar, roiLabel, roiComboBox, qualityFilterPane);
         VBox.setVgrow(treeView, Priority.ALWAYS);
         leftPane.setPadding(new Insets(4));
         leftPane.setPrefWidth(280);
@@ -144,6 +159,15 @@ public class FlowPathPane extends BorderPane {
         // --- Status bar ---
         statusBar = new Label("Total: 0 cells | Excluded: 0 | Gates: 0");
         statusBar.setStyle("-fx-font-size: 11; -fx-text-fill: #aaaaaa; -fx-padding: 2 6 2 6;");
+        ProgressIndicator spinner = new ProgressIndicator();
+        spinner.setPrefSize(14, 14);
+        spinner.setMaxSize(14, 14);
+        spinner.setVisible(false);
+        previewService.setOnUpdateStarted(() -> Platform.runLater(() -> spinner.setVisible(true)));
+        previewService.setOnUpdateComplete(() -> Platform.runLater(() -> {
+            spinner.setVisible(false);
+            onPreviewUpdated();
+        }));
 
         // --- Bottom toolbar ---
         Button saveBtn = new Button("Save JSON");
@@ -156,10 +180,20 @@ public class FlowPathPane extends BorderPane {
         exportBtn.setOnAction(e -> exportCsv());
         exportBtn.setTooltip(new Tooltip("Export phenotype assignments to CSV (Ctrl+E)"));
 
-        HBox toolbar = new HBox(8, saveBtn, loadBtn, new Separator(Orientation.VERTICAL), exportBtn);
+        Button saveTemplateBtn = new Button("Save Template");
+        saveTemplateBtn.setOnAction(e -> saveTemplate());
+        saveTemplateBtn.setTooltip(new Tooltip("Save gate tree as reusable template"));
+        Button loadTemplateBtn = new Button("Load Template");
+        loadTemplateBtn.setOnAction(e -> loadTemplate());
+        loadTemplateBtn.setTooltip(new Tooltip("Load a gate tree template"));
+
+        HBox toolbar = new HBox(8, saveBtn, loadBtn, new Separator(Orientation.VERTICAL),
+            exportBtn, new Separator(Orientation.VERTICAL), saveTemplateBtn, loadTemplateBtn);
         toolbar.setPadding(new Insets(6));
 
-        VBox bottomBox = new VBox(statusBar, toolbar);
+        HBox statusRow = new HBox(6, spinner, statusBar);
+        statusRow.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
+        VBox bottomBox = new VBox(statusRow, toolbar);
         setBottom(bottomBox);
 
         // --- Keyboard shortcuts ---
@@ -248,7 +282,6 @@ public class FlowPathPane extends BorderPane {
         previewService.setGateTree(gateTree);
         previewService.setImageData(imageData);
         previewService.setUseZScore(editorPane.isUseZScore());
-        previewService.setOnUpdateComplete(this::onPreviewUpdated);
         previewService.setOnStatsRecomputed(() -> {
             editorPane.setMarkerStats(previewService.getMarkerStats());
             recomputeQualityMask();
@@ -672,6 +705,116 @@ public class FlowPathPane extends BorderPane {
             Dialogs.showInfoNotification("FlowPath", "Exported " + file.getName());
         } catch (Exception ex) {
             Dialogs.showErrorMessage("Export Error", ex.getMessage());
+        }
+    }
+
+    // --- Context menu ---
+
+    private void showTreeContextMenu(double screenX, double screenY) {
+        GateNode selected = getSelectedGateNode();
+        ContextMenu menu = new ContextMenu();
+
+        if (selected != null) {
+            // Add child gate to each branch
+            for (int i = 0; i < selected.getBranches().size(); i++) {
+                Branch branch = selected.getBranches().get(i);
+                int branchIdx = i;
+                MenuItem addItem = new MenuItem("Add child to '" + branch.getName() + "'");
+                addItem.setOnAction(e -> addChildGate(branchIdx));
+                menu.getItems().add(addItem);
+            }
+            menu.getItems().add(new SeparatorMenuItem());
+
+            MenuItem dupItem = new MenuItem("Duplicate (Ctrl+D)");
+            dupItem.setOnAction(e -> duplicateSelectedGate());
+            menu.getItems().add(dupItem);
+
+            MenuItem removeItem = new MenuItem("Remove (Del)");
+            removeItem.setOnAction(e -> removeSelectedGate());
+            menu.getItems().add(removeItem);
+        } else {
+            MenuItem addRoot = new MenuItem("Add Root Gate...");
+            addRoot.setOnAction(e -> addRootGate());
+            menu.getItems().add(addRoot);
+        }
+
+        menu.show(treeView, screenX, screenY);
+    }
+
+    private void duplicateSelectedGate() {
+        GateNode selected = getSelectedGateNode();
+        if (selected == null) return;
+
+        GateNode copy = selected.deepCopy();
+
+        // Insert as sibling: find parent and add to the same branch
+        if (gateTree.getRoots().contains(selected)) {
+            gateTree.addRoot(copy);
+        } else {
+            // Search for the branch containing the selected gate
+            for (GateNode root : gateTree.getRoots()) {
+                if (insertSiblingCopy(root, selected, copy)) break;
+            }
+        }
+        rebuildTreeView();
+        requestPreviewUpdate();
+    }
+
+    private boolean insertSiblingCopy(GateNode node, GateNode target, GateNode copy) {
+        for (Branch branch : node.getBranches()) {
+            if (branch.getChildren().contains(target)) {
+                branch.getChildren().add(copy);
+                return true;
+            }
+            for (GateNode child : branch.getChildren()) {
+                if (insertSiblingCopy(child, target, copy)) return true;
+            }
+        }
+        return false;
+    }
+
+    private void collapseAll(TreeItem<?> item) {
+        if (item == null) return;
+        item.setExpanded(false);
+        for (TreeItem<?> child : item.getChildren()) {
+            collapseAll(child);
+        }
+    }
+
+    // --- Templates ---
+
+    private void saveTemplate() {
+        if (gateTree.getRoots().isEmpty()) {
+            Dialogs.showWarningNotification("FlowPath", "No gates to save as template.");
+            return;
+        }
+        File file = Dialogs.promptToSaveFile("Save Template", null, "template.json", "JSON", ".json");
+        if (file == null) return;
+        try {
+            // Save just the gate tree (no QF or ROI filter)
+            GateTree templateTree = new GateTree();
+            templateTree.setRoots(gateTree.getRoots());
+            FlowPathSerializer.save(templateTree, file);
+            Dialogs.showInfoNotification("FlowPath", "Template saved to " + file.getName());
+        } catch (Exception ex) {
+            Dialogs.showErrorMessage("Save Template Error", ex.getMessage());
+        }
+    }
+
+    private void loadTemplate() {
+        File file = Dialogs.promptForFile("Load Template", null, "JSON", ".json");
+        if (file == null) return;
+        try {
+            GateTree templateTree = FlowPathSerializer.load(file);
+            // Merge template gates into current tree (add as roots)
+            for (GateNode root : templateTree.getRoots()) {
+                gateTree.addRoot(root);
+            }
+            rebuildTreeView();
+            requestPreviewUpdate();
+            Dialogs.showInfoNotification("FlowPath", "Template loaded from " + file.getName());
+        } catch (Exception ex) {
+            Dialogs.showErrorMessage("Load Template Error", ex.getMessage());
         }
     }
 
