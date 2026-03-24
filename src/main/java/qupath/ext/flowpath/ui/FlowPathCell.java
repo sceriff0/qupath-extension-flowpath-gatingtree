@@ -13,16 +13,17 @@ import javafx.scene.layout.Region;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
+import qupath.ext.flowpath.model.Branch;
 import qupath.ext.flowpath.model.ColorUtils;
 import qupath.ext.flowpath.model.GateNode;
+import qupath.ext.flowpath.model.QuadrantGate;
 
 /**
- * Custom TreeCell for rendering gate tree items with a polished dark-theme design (v0.2.0).
+ * Custom TreeCell for rendering gate tree items with a polished dark-theme design.
  * <p>
- * Gate nodes render as full-width colored bars (muted blue-gray) with bold channel name
- * and lighter threshold text. Branch items render as colored pill badges whose background
- * matches the user-set positive/negative color, with right-aligned counts and a star
- * marker for leaf phenotypes.
+ * Gate nodes render as full-width colored bars with bold channel name and threshold text.
+ * Branch items render as colored pill badges with right-aligned counts and a star marker
+ * for leaf phenotypes. Supports both threshold (2 branches) and quadrant (4 branches) gates.
  */
 public class FlowPathCell extends TreeCell<Object> {
 
@@ -35,14 +36,32 @@ public class FlowPathCell extends TreeCell<Object> {
     private static final String STAR = "\u2605";
 
     /**
-     * Wrapper for a branch (positive or negative side of a gate).
+     * Wrapper for a branch of a gate (generic — works for any gate type).
      */
     public static class BranchItem {
         public final GateNode parentGate;
+        public final Branch branch;
+        public final int branchIndex;
+        /** @deprecated Use the Branch-based constructor instead. */
         public final boolean isPositive;
 
+        /**
+         * New generic constructor using Branch reference.
+         */
+        public BranchItem(GateNode parentGate, Branch branch, int branchIndex) {
+            this.parentGate = parentGate;
+            this.branch = branch;
+            this.branchIndex = branchIndex;
+            this.isPositive = (branchIndex == 0);
+        }
+
+        /**
+         * Backward-compatible constructor for threshold gates.
+         */
         public BranchItem(GateNode parentGate, boolean isPositive) {
             this.parentGate = parentGate;
+            this.branchIndex = isPositive ? 0 : 1;
+            this.branch = parentGate.getBranches().get(this.branchIndex);
             this.isPositive = isPositive;
         }
     }
@@ -64,8 +83,8 @@ public class FlowPathCell extends TreeCell<Object> {
         if (item instanceof GateNode node) {
             setGraphic(buildGateNodeGraphic(node));
             setText(null);
-        } else if (item instanceof BranchItem branch) {
-            setGraphic(buildBranchGraphic(branch));
+        } else if (item instanceof BranchItem bi) {
+            setGraphic(buildBranchGraphic(bi));
             setText(null);
         } else {
             setText(item.toString());
@@ -80,46 +99,53 @@ public class FlowPathCell extends TreeCell<Object> {
         bar.setAlignment(Pos.CENTER_LEFT);
         bar.setPadding(BAR_PADDING);
         bar.setBackground(new Background(new BackgroundFill(GATE_BAR_COLOR, BAR_RADII, Insets.EMPTY)));
-        // Stretch to fill available width
         bar.setMaxWidth(Double.MAX_VALUE);
         HBox.setHgrow(bar, Priority.ALWAYS);
 
-        // Channel name - bold white
-        Label channelLabel = new Label(node.getChannel());
-        channelLabel.setFont(Font.font(null, FontWeight.BOLD, 13));
-        channelLabel.setTextFill(Color.WHITE);
+        if (node instanceof QuadrantGate qg) {
+            // Quadrant gate: show both channels
+            Label channelLabel = new Label(qg.getChannelX() + " / " + qg.getChannelY());
+            channelLabel.setFont(Font.font(null, FontWeight.BOLD, 13));
+            channelLabel.setTextFill(Color.WHITE);
 
-        // Threshold value - lighter text
-        String thresholdText = node.isThresholdIsZScore()
-                ? String.format("z = %.3f", node.getThreshold())
-                : String.format("t = %.3f", node.getThreshold());
-        Label thresholdLabel = new Label(thresholdText);
-        thresholdLabel.setFont(Font.font(null, FontWeight.NORMAL, 11));
-        thresholdLabel.setTextFill(Color.web("#a0b0c0"));
+            Label typeLabel = new Label("[Quadrant]");
+            typeLabel.setFont(Font.font(null, FontWeight.NORMAL, 10));
+            typeLabel.setTextFill(Color.web("#80b0d0"));
 
-        bar.getChildren().addAll(channelLabel, thresholdLabel);
+            bar.getChildren().addAll(channelLabel, typeLabel);
+        } else {
+            // Threshold gate
+            Label channelLabel = new Label(node.getChannel());
+            channelLabel.setFont(Font.font(null, FontWeight.BOLD, 13));
+            channelLabel.setTextFill(Color.WHITE);
+
+            String thresholdText = node.isThresholdIsZScore()
+                    ? String.format("z = %.3f", node.getThreshold())
+                    : String.format("t = %.3f", node.getThreshold());
+            Label thresholdLabel = new Label(thresholdText);
+            thresholdLabel.setFont(Font.font(null, FontWeight.NORMAL, 11));
+            thresholdLabel.setTextFill(Color.web("#a0b0c0"));
+
+            bar.getChildren().addAll(channelLabel, thresholdLabel);
+        }
+
         return bar;
     }
 
     // ---- Branch item: colored pill/badge --------------------------------------------------
 
-    private HBox buildBranchGraphic(BranchItem branch) {
-        GateNode gate = branch.parentGate;
-        boolean isPos = branch.isPositive;
+    private HBox buildBranchGraphic(BranchItem bi) {
+        Branch branch = bi.branch;
+        Color pillColor = ColorUtils.intToColor(branch.getColor());
+        String name = branch.getName();
+        int count = branch.getCount();
+        boolean isLeaf = branch.isLeaf();
 
-        int colorInt = isPos ? gate.getPositiveColor() : gate.getNegativeColor();
-        Color pillColor = ColorUtils.intToColor(colorInt);
-        String name = isPos ? gate.getPositiveName() : gate.getNegativeName();
-        int count = isPos ? gate.getPosCount() : gate.getNegCount();
-        boolean isLeaf = isPos ? gate.getPositiveChildren().isEmpty() : gate.getNegativeChildren().isEmpty();
-
-        // Outer row spanning full width
         HBox row = new HBox(8);
         row.setAlignment(Pos.CENTER_LEFT);
         row.setMaxWidth(Double.MAX_VALUE);
         HBox.setHgrow(row, Priority.ALWAYS);
 
-        // Pill badge
         HBox pill = new HBox(4);
         pill.setAlignment(Pos.CENTER_LEFT);
         pill.setPadding(PILL_PADDING);
@@ -132,11 +158,9 @@ public class FlowPathCell extends TreeCell<Object> {
 
         pill.getChildren().add(nameLabel);
 
-        // Spacer pushes count to the right
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        // Count label - right-aligned gray text
         Label countLabel = new Label(String.format("%,d", count));
         countLabel.setFont(Font.font(null, FontWeight.NORMAL, 11));
         countLabel.setTextFill(Color.web("#888888"));

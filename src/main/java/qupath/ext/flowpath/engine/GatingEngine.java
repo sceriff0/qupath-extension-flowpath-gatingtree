@@ -1,10 +1,16 @@
 package qupath.ext.flowpath.engine;
 
+import qupath.ext.flowpath.model.Branch;
 import qupath.ext.flowpath.model.CellIndex;
 import qupath.ext.flowpath.model.GateNode;
 import qupath.ext.flowpath.model.GateTree;
 import qupath.ext.flowpath.model.MarkerStats;
 import qupath.ext.flowpath.model.QualityFilter;
+import qupath.ext.flowpath.model.BooleanGate;
+import qupath.ext.flowpath.model.EllipseGate;
+import qupath.ext.flowpath.model.PolygonGate;
+import qupath.ext.flowpath.model.QuadrantGate;
+import qupath.ext.flowpath.model.RectangleGate;
 import qupath.lib.objects.PathObject;
 import qupath.lib.roi.interfaces.ROI;
 
@@ -194,6 +200,20 @@ public final class GatingEngine {
     private static void walkNode(GateNode node, int cellIdx,
                                  CellIndex index, MarkerStats stats, boolean useZScore,
                                  String[] phenotypes, boolean[] excluded, int[] colors) {
+        if (node instanceof QuadrantGate qg) {
+            walkQuadrantNode(qg, cellIdx, index, stats, useZScore, phenotypes, excluded, colors);
+        } else if (node instanceof BooleanGate bg) {
+            walkBooleanNode(bg, cellIdx, index, stats, useZScore, phenotypes, excluded, colors);
+        } else if (node instanceof PolygonGate || node instanceof RectangleGate || node instanceof EllipseGate) {
+            walk2DNode(node, cellIdx, index, stats, useZScore, phenotypes, excluded, colors);
+        } else {
+            walkThresholdNode(node, cellIdx, index, stats, useZScore, phenotypes, excluded, colors);
+        }
+    }
+
+    private static void walkThresholdNode(GateNode node, int cellIdx,
+                                           CellIndex index, MarkerStats stats, boolean useZScore,
+                                           String[] phenotypes, boolean[] excluded, int[] colors) {
         String channel = node.getChannel();
         int markerIdx = index.getMarkerIndex(channel);
         if (markerIdx < 0) {
@@ -215,27 +235,159 @@ public final class GatingEngine {
         double compareValue = useZScore ? stats.toZScore(channel, rawValue) : rawValue;
         double threshold = node.getThreshold();
 
+        Branch branch;
         if (compareValue >= threshold) {
-            node.setPosCount(node.getPosCount() + 1);
-            assignBranch(node.getPositiveName(), node.getPositiveColor(),
-                    node.getPositiveChildren(), cellIdx, index, stats,
-                    useZScore, phenotypes, excluded, colors);
+            branch = node.getBranches().get(0); // positive
         } else {
-            node.setNegCount(node.getNegCount() + 1);
-            assignBranch(node.getNegativeName(), node.getNegativeColor(),
-                    node.getNegativeChildren(), cellIdx, index, stats,
-                    useZScore, phenotypes, excluded, colors);
+            branch = node.getBranches().get(1); // negative
         }
+        branch.setCount(branch.getCount() + 1);
+        assignBranch(branch, cellIdx, index, stats, useZScore, phenotypes, excluded, colors);
     }
 
-    private static void assignBranch(String name, int color, List<GateNode> children,
-                                      int cellIdx, CellIndex index, MarkerStats stats,
+    private static void walkQuadrantNode(QuadrantGate gate, int cellIdx,
+                                          CellIndex index, MarkerStats stats, boolean useZScore,
+                                          String[] phenotypes, boolean[] excluded, int[] colors) {
+        int markerIdxX = index.getMarkerIndex(gate.getChannelX());
+        int markerIdxY = index.getMarkerIndex(gate.getChannelY());
+        if (markerIdxX < 0 || markerIdxY < 0) {
+            return;
+        }
+
+        double rawX = index.getMarkerValues(markerIdxX)[cellIdx];
+        double rawY = index.getMarkerValues(markerIdxY)[cellIdx];
+
+        // Outlier exclusion on X channel
+        if (gate.isExcludeOutliers()) {
+            double loX = stats.getPercentileValue(gate.getChannelX(), gate.getClipPercentileLow());
+            double hiX = stats.getPercentileValue(gate.getChannelX(), gate.getClipPercentileHigh());
+            if (rawX < loX || rawX > hiX) {
+                excluded[cellIdx] = true;
+                return;
+            }
+            double loY = stats.getPercentileValue(gate.getChannelY(), gate.getClipPercentileLow());
+            double hiY = stats.getPercentileValue(gate.getChannelY(), gate.getClipPercentileHigh());
+            if (rawY < loY || rawY > hiY) {
+                excluded[cellIdx] = true;
+                return;
+            }
+        }
+
+        double compareX = useZScore ? stats.toZScore(gate.getChannelX(), rawX) : rawX;
+        double compareY = useZScore ? stats.toZScore(gate.getChannelY(), rawY) : rawY;
+
+        int quadrant = gate.evaluateQuadrant(compareX, compareY);
+        Branch branch = gate.getBranches().get(quadrant);
+        branch.setCount(branch.getCount() + 1);
+        assignBranch(branch, cellIdx, index, stats, useZScore, phenotypes, excluded, colors);
+    }
+
+    private static void walk2DNode(GateNode node, int cellIdx,
+                                      CellIndex index, MarkerStats stats, boolean useZScore,
+                                      String[] phenotypes, boolean[] excluded, int[] colors) {
+        List<String> channels = node.getChannels();
+        if (channels.size() < 2) return;
+        String chX = channels.get(0);
+        String chY = channels.get(1);
+        int mxIdx = index.getMarkerIndex(chX);
+        int myIdx = index.getMarkerIndex(chY);
+        if (mxIdx < 0 || myIdx < 0) return;
+
+        double rawX = index.getMarkerValues(mxIdx)[cellIdx];
+        double rawY = index.getMarkerValues(myIdx)[cellIdx];
+        double vx = useZScore ? stats.toZScore(chX, rawX) : rawX;
+        double vy = useZScore ? stats.toZScore(chY, rawY) : rawY;
+
+        boolean inside;
+        if (node instanceof PolygonGate pg) {
+            inside = pg.contains(vx, vy);
+        } else if (node instanceof RectangleGate rg) {
+            inside = rg.contains(vx, vy);
+        } else if (node instanceof EllipseGate eg) {
+            inside = eg.contains(vx, vy);
+        } else {
+            inside = false;
+        }
+
+        Branch branch = inside ? node.getBranches().get(0) : node.getBranches().get(1);
+        branch.setCount(branch.getCount() + 1);
+        assignBranch(branch, cellIdx, index, stats, useZScore, phenotypes, excluded, colors);
+    }
+
+    private static void walkBooleanNode(BooleanGate gate, int cellIdx,
+                                          CellIndex index, MarkerStats stats, boolean useZScore,
+                                          String[] phenotypes, boolean[] excluded, int[] colors) {
+        // Evaluate each operand gate against this cell to determine pass/fail
+        boolean result;
+        List<GateNode> operands = gate.getOperands();
+
+        if (operands.isEmpty()) {
+            result = false;
+        } else {
+            switch (gate.getOperation()) {
+                case AND -> {
+                    result = true;
+                    for (GateNode op : operands) {
+                        if (!evaluateOperandPass(op, cellIdx, index, stats, useZScore)) {
+                            result = false;
+                            break;
+                        }
+                    }
+                }
+                case OR -> {
+                    result = false;
+                    for (GateNode op : operands) {
+                        if (evaluateOperandPass(op, cellIdx, index, stats, useZScore)) {
+                            result = true;
+                            break;
+                        }
+                    }
+                }
+                case NOT -> {
+                    result = !evaluateOperandPass(operands.get(0), cellIdx, index, stats, useZScore);
+                }
+                default -> result = false;
+            }
+        }
+
+        Branch branch = result ? gate.getBranches().get(0) : gate.getBranches().get(1);
+        branch.setCount(branch.getCount() + 1);
+        assignBranch(branch, cellIdx, index, stats, useZScore, phenotypes, excluded, colors);
+    }
+
+    /**
+     * Evaluate whether a cell passes a gate (would fall into the positive/first branch).
+     * Used by BooleanGate to check operand results.
+     */
+    private static boolean evaluateOperandPass(GateNode gate, int cellIdx,
+                                                CellIndex index, MarkerStats stats, boolean useZScore) {
+        if (gate instanceof QuadrantGate qg) {
+            int mxIdx = index.getMarkerIndex(qg.getChannelX());
+            int myIdx = index.getMarkerIndex(qg.getChannelY());
+            if (mxIdx < 0 || myIdx < 0) return false;
+            double vx = useZScore ? stats.toZScore(qg.getChannelX(), index.getMarkerValues(mxIdx)[cellIdx])
+                                  : index.getMarkerValues(mxIdx)[cellIdx];
+            double vy = useZScore ? stats.toZScore(qg.getChannelY(), index.getMarkerValues(myIdx)[cellIdx])
+                                  : index.getMarkerValues(myIdx)[cellIdx];
+            return qg.evaluateQuadrant(vx, vy) == 0; // PP quadrant = "positive"
+        }
+        // Threshold gate: positive = value >= threshold
+        String channel = gate.getChannel();
+        int markerIdx = index.getMarkerIndex(channel);
+        if (markerIdx < 0) return false;
+        double rawValue = index.getMarkerValues(markerIdx)[cellIdx];
+        double compareValue = useZScore ? stats.toZScore(channel, rawValue) : rawValue;
+        return compareValue >= gate.getThreshold();
+    }
+
+    private static void assignBranch(Branch branch, int cellIdx,
+                                      CellIndex index, MarkerStats stats,
                                       boolean useZScore, String[] phenotypes,
                                       boolean[] excluded, int[] colors) {
-        phenotypes[cellIdx] = name;
-        colors[cellIdx] = color;
-        if (children != null && !children.isEmpty()) {
-            for (GateNode child : children) {
+        phenotypes[cellIdx] = branch.getName();
+        colors[cellIdx] = branch.getColor();
+        if (!branch.getChildren().isEmpty()) {
+            for (GateNode child : branch.getChildren()) {
                 if (excluded[cellIdx]) return;
                 walkNode(child, cellIdx, index, stats, useZScore, phenotypes, excluded, colors);
             }
@@ -247,10 +399,10 @@ public final class GatingEngine {
             return;
         }
         for (GateNode node : nodes) {
-            node.setPosCount(0);
-            node.setNegCount(0);
-            resetCounts(node.getPositiveChildren());
-            resetCounts(node.getNegativeChildren());
+            for (Branch branch : node.getBranches()) {
+                branch.setCount(0);
+                resetCounts(branch.getChildren());
+            }
         }
     }
 }

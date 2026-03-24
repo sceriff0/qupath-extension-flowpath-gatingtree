@@ -15,7 +15,12 @@ import qupath.ext.flowpath.engine.GatingEngine;
 import qupath.ext.flowpath.engine.LivePreviewService;
 import qupath.ext.flowpath.io.FlowPathSerializer;
 import qupath.ext.flowpath.io.PhenotypeCsvExporter;
-import qupath.ext.flowpath.model.*;
+import qupath.ext.flowpath.model.Branch;
+import qupath.ext.flowpath.model.CellIndex;
+import qupath.ext.flowpath.model.GateNode;
+import qupath.ext.flowpath.model.GateTree;
+import qupath.ext.flowpath.model.MarkerStats;
+import qupath.ext.flowpath.model.QuadrantGate;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.gui.dialogs.Dialogs;
 import qupath.lib.images.ImageData;
@@ -323,21 +328,15 @@ public class FlowPathPane extends BorderPane {
         TreeItem<Object> gateItem = new TreeItem<>(gate);
         gateItem.setExpanded(true);
 
-        // Positive branch
-        TreeItem<Object> posItem = new TreeItem<>(new FlowPathCell.BranchItem(gate, true));
-        posItem.setExpanded(true);
-        for (GateNode child : gate.getPositiveChildren()) {
-            posItem.getChildren().add(buildTreeItem(child));
+        for (int i = 0; i < gate.getBranches().size(); i++) {
+            Branch branch = gate.getBranches().get(i);
+            TreeItem<Object> branchItem = new TreeItem<>(new FlowPathCell.BranchItem(gate, branch, i));
+            branchItem.setExpanded(true);
+            for (GateNode child : branch.getChildren()) {
+                branchItem.getChildren().add(buildTreeItem(child));
+            }
+            gateItem.getChildren().add(branchItem);
         }
-        gateItem.getChildren().add(posItem);
-
-        // Negative branch
-        TreeItem<Object> negItem = new TreeItem<>(new FlowPathCell.BranchItem(gate, false));
-        negItem.setExpanded(true);
-        for (GateNode child : gate.getNegativeChildren()) {
-            negItem.getChildren().add(buildTreeItem(child));
-        }
-        gateItem.getChildren().add(negItem);
 
         return gateItem;
     }
@@ -390,7 +389,7 @@ public class FlowPathPane extends BorderPane {
         GateNode selected = getSelectedGateNode();
         if (selected == null) return;
 
-        boolean hasChildren = !selected.getPositiveChildren().isEmpty() || !selected.getNegativeChildren().isEmpty();
+        boolean hasChildren = !selected.isLeaf();
         if (hasChildren) {
             boolean confirm = Dialogs.showConfirmDialog("Remove Gate",
                 "This gate has child gates. Remove entire subtree?");
@@ -409,10 +408,10 @@ public class FlowPathPane extends BorderPane {
 
     private boolean removeFromTree(List<GateNode> nodes, GateNode target) {
         for (GateNode node : nodes) {
-            if (node.getPositiveChildren().remove(target)) return true;
-            if (node.getNegativeChildren().remove(target)) return true;
-            if (removeFromTree(node.getPositiveChildren(), target)) return true;
-            if (removeFromTree(node.getNegativeChildren(), target)) return true;
+            for (Branch branch : node.getBranches()) {
+                if (branch.getChildren().remove(target)) return true;
+                if (removeFromTree(branch.getChildren(), target)) return true;
+            }
         }
         return false;
     }
@@ -572,8 +571,9 @@ public class FlowPathPane extends BorderPane {
         int count = 0;
         for (GateNode node : nodes) {
             count++;
-            count += countGates(node.getPositiveChildren());
-            count += countGates(node.getNegativeChildren());
+            for (Branch branch : node.getBranches()) {
+                count += countGates(branch.getChildren());
+            }
         }
         return count;
     }

@@ -6,10 +6,16 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import qupath.ext.flowpath.model.BooleanGate;
+import qupath.ext.flowpath.model.Branch;
 import qupath.ext.flowpath.model.ColorUtils;
 import qupath.ext.flowpath.model.GateNode;
 import qupath.ext.flowpath.model.GateTree;
+import qupath.ext.flowpath.model.EllipseGate;
+import qupath.ext.flowpath.model.PolygonGate;
 import qupath.ext.flowpath.model.QualityFilter;
+import qupath.ext.flowpath.model.QuadrantGate;
+import qupath.ext.flowpath.model.RectangleGate;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -128,6 +134,18 @@ public class FlowPathSerializer {
     //  Gate nodes
     // -----------------------------------------------------------------------
 
+    private static void serializeTwoBranches(JsonObject obj, List<Branch> branches) {
+        JsonArray arr = new JsonArray();
+        for (Branch b : branches) {
+            JsonObject bo = new JsonObject();
+            bo.addProperty("name", b.getName());
+            bo.add("color", ColorUtils.toJsonArray(b.getColor()));
+            bo.add("children", serializeNodeList(b.getChildren()));
+            arr.add(bo);
+        }
+        obj.add("branches", arr);
+    }
+
     private static JsonArray serializeNodeList(List<GateNode> nodes) {
         JsonArray array = new JsonArray();
         for (GateNode node : nodes) {
@@ -138,18 +156,80 @@ public class FlowPathSerializer {
 
     private static JsonObject serializeNode(GateNode node) {
         JsonObject obj = new JsonObject();
-        obj.addProperty("channel", node.getChannel());
-        obj.addProperty("threshold", node.getThreshold());
-        obj.addProperty("thresholdIsZScore", node.isThresholdIsZScore());
-        obj.addProperty("positiveName", node.getPositiveName());
-        obj.addProperty("negativeName", node.getNegativeName());
-        obj.add("positiveColor", ColorUtils.toJsonArray(node.getPositiveColor()));
-        obj.add("negativeColor", ColorUtils.toJsonArray(node.getNegativeColor()));
+        obj.addProperty("type", node.getGateType());
         obj.addProperty("clipPercentileLow", node.getClipPercentileLow());
         obj.addProperty("clipPercentileHigh", node.getClipPercentileHigh());
         obj.addProperty("excludeOutliers", node.isExcludeOutliers());
-        obj.add("positiveChildren", serializeNodeList(node.getPositiveChildren()));
-        obj.add("negativeChildren", serializeNodeList(node.getNegativeChildren()));
+
+        if (node instanceof BooleanGate bg) {
+            obj.addProperty("operation", bg.getOperation().name());
+            obj.add("operands", serializeNodeList(bg.getOperands()));
+            // Serialize 2 branches (match/no-match)
+            JsonArray branches = new JsonArray();
+            for (Branch b : bg.getBranches()) {
+                JsonObject bo = new JsonObject();
+                bo.addProperty("name", b.getName());
+                bo.add("color", ColorUtils.toJsonArray(b.getColor()));
+                bo.add("children", serializeNodeList(b.getChildren()));
+                branches.add(bo);
+            }
+            obj.add("branches", branches);
+        } else if (node instanceof PolygonGate pg) {
+            obj.addProperty("channelX", pg.getChannelX());
+            obj.addProperty("channelY", pg.getChannelY());
+            JsonArray verts = new JsonArray();
+            for (double[] v : pg.getVertices()) {
+                JsonArray pt = new JsonArray();
+                pt.add(v[0]); pt.add(v[1]);
+                verts.add(pt);
+            }
+            obj.add("vertices", verts);
+            serializeTwoBranches(obj, pg.getBranches());
+        } else if (node instanceof RectangleGate rg) {
+            obj.addProperty("channelX", rg.getChannelX());
+            obj.addProperty("channelY", rg.getChannelY());
+            obj.addProperty("minX", rg.getMinX());
+            obj.addProperty("maxX", rg.getMaxX());
+            obj.addProperty("minY", rg.getMinY());
+            obj.addProperty("maxY", rg.getMaxY());
+            serializeTwoBranches(obj, rg.getBranches());
+        } else if (node instanceof EllipseGate eg) {
+            obj.addProperty("channelX", eg.getChannelX());
+            obj.addProperty("channelY", eg.getChannelY());
+            obj.addProperty("centerX", eg.getCenterX());
+            obj.addProperty("centerY", eg.getCenterY());
+            obj.addProperty("radiusX", eg.getRadiusX());
+            obj.addProperty("radiusY", eg.getRadiusY());
+            serializeTwoBranches(obj, eg.getBranches());
+        } else if (node instanceof QuadrantGate qg) {
+            obj.addProperty("channelX", qg.getChannelX());
+            obj.addProperty("channelY", qg.getChannelY());
+            obj.addProperty("thresholdX", qg.getThresholdX());
+            obj.addProperty("thresholdY", qg.getThresholdY());
+            obj.addProperty("thresholdIsZScore", qg.isThresholdIsZScore());
+            // Serialize 4 branches
+            JsonArray branches = new JsonArray();
+            for (Branch b : qg.getBranches()) {
+                JsonObject bo = new JsonObject();
+                bo.addProperty("name", b.getName());
+                bo.add("color", ColorUtils.toJsonArray(b.getColor()));
+                bo.add("children", serializeNodeList(b.getChildren()));
+                branches.add(bo);
+            }
+            obj.add("branches", branches);
+        } else {
+            // Threshold gate (default) — backward-compatible format
+            obj.addProperty("channel", node.getChannel());
+            obj.addProperty("threshold", node.getThreshold());
+            obj.addProperty("thresholdIsZScore", node.isThresholdIsZScore());
+            obj.addProperty("positiveName", node.getPositiveName());
+            obj.addProperty("negativeName", node.getNegativeName());
+            obj.add("positiveColor", ColorUtils.toJsonArray(node.getPositiveColor()));
+            obj.add("negativeColor", ColorUtils.toJsonArray(node.getNegativeColor()));
+            obj.add("positiveChildren", serializeNodeList(node.getPositiveChildren()));
+            obj.add("negativeChildren", serializeNodeList(node.getNegativeChildren()));
+        }
+
         return obj;
     }
 
@@ -162,7 +242,43 @@ public class FlowPathSerializer {
     }
 
     private static GateNode deserializeNode(JsonObject obj) {
+        String type = obj.has("type") ? obj.get("type").getAsString() : "threshold";
+
+        // Shared fields
+        double clipLow = obj.has("clipPercentileLow") ? obj.get("clipPercentileLow").getAsDouble() : 1.0;
+        double clipHigh = obj.has("clipPercentileHigh") ? obj.get("clipPercentileHigh").getAsDouble() : 99.0;
+        boolean excludeOutliers = false;
+        if (obj.has("excludeOutliers"))
+            excludeOutliers = obj.get("excludeOutliers").getAsBoolean();
+        else if (obj.has("hideOutliers"))
+            excludeOutliers = obj.get("hideOutliers").getAsBoolean();
+
+        if ("quadrant".equals(type)) {
+            return deserializeQuadrantNode(obj, clipLow, clipHigh, excludeOutliers);
+        }
+        if ("boolean".equals(type)) {
+            return deserializeBooleanNode(obj, clipLow, clipHigh, excludeOutliers);
+        }
+        if ("polygon".equals(type)) {
+            return deserialize2DNode(new PolygonGate(), obj, clipLow, clipHigh, excludeOutliers);
+        }
+        if ("rectangle".equals(type)) {
+            return deserialize2DNode(new RectangleGate(), obj, clipLow, clipHigh, excludeOutliers);
+        }
+        if ("ellipse".equals(type)) {
+            return deserialize2DNode(new EllipseGate(), obj, clipLow, clipHigh, excludeOutliers);
+        }
+
+        // Default: threshold gate (backward-compatible)
+        return deserializeThresholdNode(obj, clipLow, clipHigh, excludeOutliers);
+    }
+
+    private static GateNode deserializeThresholdNode(JsonObject obj,
+                                                      double clipLow, double clipHigh, boolean excludeOutliers) {
         GateNode node = new GateNode();
+        node.setClipPercentileLow(clipLow);
+        node.setClipPercentileHigh(clipHigh);
+        node.setExcludeOutliers(excludeOutliers);
 
         if (obj.has("channel"))
             node.setChannel(obj.get("channel").getAsString());
@@ -178,20 +294,123 @@ public class FlowPathSerializer {
             node.setPositiveColor(ColorUtils.fromJsonArray(obj.getAsJsonArray("positiveColor")));
         if (obj.has("negativeColor"))
             node.setNegativeColor(ColorUtils.fromJsonArray(obj.getAsJsonArray("negativeColor")));
-        if (obj.has("clipPercentileLow"))
-            node.setClipPercentileLow(obj.get("clipPercentileLow").getAsDouble());
-        if (obj.has("clipPercentileHigh"))
-            node.setClipPercentileHigh(obj.get("clipPercentileHigh").getAsDouble());
-        if (obj.has("excludeOutliers"))
-            node.setExcludeOutliers(obj.get("excludeOutliers").getAsBoolean());
-        else if (obj.has("hideOutliers"))
-            node.setExcludeOutliers(obj.get("hideOutliers").getAsBoolean());
         if (obj.has("positiveChildren"))
             node.setPositiveChildren(deserializeNodeList(obj.getAsJsonArray("positiveChildren")));
         if (obj.has("negativeChildren"))
             node.setNegativeChildren(deserializeNodeList(obj.getAsJsonArray("negativeChildren")));
 
         return node;
+    }
+
+    private static QuadrantGate deserializeQuadrantNode(JsonObject obj,
+                                                         double clipLow, double clipHigh, boolean excludeOutliers) {
+        QuadrantGate gate = new QuadrantGate();
+        gate.setClipPercentileLow(clipLow);
+        gate.setClipPercentileHigh(clipHigh);
+        gate.setExcludeOutliers(excludeOutliers);
+
+        if (obj.has("channelX"))
+            gate.setChannelX(obj.get("channelX").getAsString());
+        if (obj.has("channelY"))
+            gate.setChannelY(obj.get("channelY").getAsString());
+        if (obj.has("thresholdX"))
+            gate.setThresholdX(obj.get("thresholdX").getAsDouble());
+        if (obj.has("thresholdY"))
+            gate.setThresholdY(obj.get("thresholdY").getAsDouble());
+        if (obj.has("thresholdIsZScore"))
+            gate.setThresholdIsZScore(obj.get("thresholdIsZScore").getAsBoolean());
+
+        if (obj.has("branches")) {
+            JsonArray branches = obj.getAsJsonArray("branches");
+            List<Branch> gateBranches = gate.getBranches();
+            for (int i = 0; i < branches.size() && i < gateBranches.size(); i++) {
+                JsonObject bo = branches.get(i).getAsJsonObject();
+                Branch b = gateBranches.get(i);
+                if (bo.has("name")) b.setName(bo.get("name").getAsString());
+                if (bo.has("color")) b.setColor(ColorUtils.fromJsonArray(bo.getAsJsonArray("color")));
+                if (bo.has("children")) b.setChildren(deserializeNodeList(bo.getAsJsonArray("children")));
+            }
+        }
+
+        return gate;
+    }
+
+    private static GateNode deserialize2DNode(GateNode gate, JsonObject obj,
+                                                double clipLow, double clipHigh, boolean excludeOutliers) {
+        gate.setClipPercentileLow(clipLow);
+        gate.setClipPercentileHigh(clipHigh);
+        gate.setExcludeOutliers(excludeOutliers);
+
+        String chX = obj.has("channelX") ? obj.get("channelX").getAsString() : null;
+        String chY = obj.has("channelY") ? obj.get("channelY").getAsString() : null;
+
+        if (gate instanceof PolygonGate pg) {
+            pg.setChannelX(chX); pg.setChannelY(chY);
+            if (obj.has("vertices")) {
+                List<double[]> verts = new ArrayList<>();
+                for (JsonElement elem : obj.getAsJsonArray("vertices")) {
+                    JsonArray pt = elem.getAsJsonArray();
+                    verts.add(new double[]{pt.get(0).getAsDouble(), pt.get(1).getAsDouble()});
+                }
+                pg.setVertices(verts);
+            }
+        } else if (gate instanceof RectangleGate rg) {
+            rg.setChannelX(chX); rg.setChannelY(chY);
+            if (obj.has("minX")) rg.setMinX(obj.get("minX").getAsDouble());
+            if (obj.has("maxX")) rg.setMaxX(obj.get("maxX").getAsDouble());
+            if (obj.has("minY")) rg.setMinY(obj.get("minY").getAsDouble());
+            if (obj.has("maxY")) rg.setMaxY(obj.get("maxY").getAsDouble());
+        } else if (gate instanceof EllipseGate eg) {
+            eg.setChannelX(chX); eg.setChannelY(chY);
+            if (obj.has("centerX")) eg.setCenterX(obj.get("centerX").getAsDouble());
+            if (obj.has("centerY")) eg.setCenterY(obj.get("centerY").getAsDouble());
+            if (obj.has("radiusX")) eg.setRadiusX(obj.get("radiusX").getAsDouble());
+            if (obj.has("radiusY")) eg.setRadiusY(obj.get("radiusY").getAsDouble());
+        }
+
+        // Deserialize branches
+        if (obj.has("branches")) {
+            JsonArray branches = obj.getAsJsonArray("branches");
+            List<Branch> gateBranches = gate.getBranches();
+            for (int i = 0; i < branches.size() && i < gateBranches.size(); i++) {
+                JsonObject bo = branches.get(i).getAsJsonObject();
+                Branch b = gateBranches.get(i);
+                if (bo.has("name")) b.setName(bo.get("name").getAsString());
+                if (bo.has("color")) b.setColor(ColorUtils.fromJsonArray(bo.getAsJsonArray("color")));
+                if (bo.has("children")) b.setChildren(deserializeNodeList(bo.getAsJsonArray("children")));
+            }
+        }
+
+        return gate;
+    }
+
+    private static BooleanGate deserializeBooleanNode(JsonObject obj,
+                                                       double clipLow, double clipHigh, boolean excludeOutliers) {
+        BooleanGate gate = new BooleanGate();
+        gate.setClipPercentileLow(clipLow);
+        gate.setClipPercentileHigh(clipHigh);
+        gate.setExcludeOutliers(excludeOutliers);
+
+        if (obj.has("operation")) {
+            gate.setOperation(BooleanGate.Op.valueOf(obj.get("operation").getAsString()));
+        }
+        if (obj.has("operands")) {
+            gate.setOperands(deserializeNodeList(obj.getAsJsonArray("operands")));
+        }
+
+        if (obj.has("branches")) {
+            JsonArray branches = obj.getAsJsonArray("branches");
+            List<Branch> gateBranches = gate.getBranches();
+            for (int i = 0; i < branches.size() && i < gateBranches.size(); i++) {
+                JsonObject bo = branches.get(i).getAsJsonObject();
+                Branch b = gateBranches.get(i);
+                if (bo.has("name")) b.setName(bo.get("name").getAsString());
+                if (bo.has("color")) b.setColor(ColorUtils.fromJsonArray(bo.getAsJsonArray("color")));
+                if (bo.has("children")) b.setChildren(deserializeNodeList(bo.getAsJsonArray("children")));
+            }
+        }
+
+        return gate;
     }
 
 }

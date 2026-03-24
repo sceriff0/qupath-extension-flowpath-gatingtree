@@ -66,8 +66,11 @@ public class GateTree {
     public static void transferCounts(List<GateNode> originals, List<GateNode> copies) {
         for (int i = 0; i < originals.size() && i < copies.size(); i++) {
             originals.get(i).transferCountsFrom(copies.get(i));
-            transferCounts(originals.get(i).getPositiveChildren(), copies.get(i).getPositiveChildren());
-            transferCounts(originals.get(i).getNegativeChildren(), copies.get(i).getNegativeChildren());
+            List<Branch> origBranches = originals.get(i).getBranches();
+            List<Branch> copyBranches = copies.get(i).getBranches();
+            for (int b = 0; b < origBranches.size() && b < copyBranches.size(); b++) {
+                transferCounts(origBranches.get(b).getChildren(), copyBranches.get(b).getChildren());
+            }
         }
     }
 

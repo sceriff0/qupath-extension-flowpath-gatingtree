@@ -1,10 +1,13 @@
 package qupath.ext.flowpath.io;
 
 import qupath.ext.flowpath.engine.GatingEngine;
+import qupath.ext.flowpath.model.BooleanGate;
+import qupath.ext.flowpath.model.Branch;
 import qupath.ext.flowpath.model.CellIndex;
 import qupath.ext.flowpath.model.GateNode;
 import qupath.ext.flowpath.model.GateTree;
 import qupath.ext.flowpath.model.MarkerStats;
+import qupath.ext.flowpath.model.QuadrantGate;
 
 import java.io.BufferedWriter;
 import java.io.File;
@@ -130,14 +133,11 @@ public class PhenotypeCsvExporter {
     }
 
     private static void collectChannelsRecursive(GateNode node, Set<String> seen) {
-        if (node.getChannel() != null) {
-            seen.add(node.getChannel());
-        }
-        for (GateNode child : node.getPositiveChildren()) {
-            collectChannelsRecursive(child, seen);
-        }
-        for (GateNode child : node.getNegativeChildren()) {
-            collectChannelsRecursive(child, seen);
+        seen.addAll(node.getChannels());
+        for (Branch branch : node.getBranches()) {
+            for (GateNode child : branch.getChildren()) {
+                collectChannelsRecursive(child, seen);
+            }
         }
     }
 
@@ -145,31 +145,50 @@ public class PhenotypeCsvExporter {
      * Recursively trace all paths through the gate tree. At each leaf (a node
      * with no children on a given branch), record the accumulated marker signs
      * keyed by the leaf phenotype name.
+     * <p>
+     * For threshold gates: positive branch gets "+", negative gets "-".
+     * For quadrant gates: each channel gets "+" or "-" based on the quadrant.
      */
     private static void traceMarkerSigns(GateNode node,
                                          Map<String, String> currentSigns,
                                          Map<String, Map<String, String>> result) {
-        // Positive branch
-        Map<String, String> positivePath = new LinkedHashMap<>(currentSigns);
-        positivePath.put(node.getChannel(), "+");
+        List<Branch> branches = node.getBranches();
+        List<String> channels = node.getChannels();
 
-        if (node.getPositiveChildren().isEmpty()) {
-            result.put(node.getPositiveName(), new LinkedHashMap<>(positivePath));
-        } else {
-            for (GateNode child : node.getPositiveChildren()) {
-                traceMarkerSigns(child, positivePath, result);
+        if (node instanceof QuadrantGate) {
+            // Quadrant: 4 branches (PP, NP, PN, NN), 2 channels (X, Y)
+            String[][] signPatterns = {{"+", "+"}, {"-", "+"}, {"+", "-"}, {"-", "-"}};
+            for (int i = 0; i < branches.size(); i++) {
+                Branch branch = branches.get(i);
+                Map<String, String> path = new LinkedHashMap<>(currentSigns);
+                for (int c = 0; c < channels.size() && c < signPatterns[i].length; c++) {
+                    path.put(channels.get(c), signPatterns[i][c]);
+                }
+                if (branch.isLeaf()) {
+                    result.put(branch.getName(), new LinkedHashMap<>(path));
+                } else {
+                    for (GateNode child : branch.getChildren()) {
+                        traceMarkerSigns(child, path, result);
+                    }
+                }
             }
-        }
-
-        // Negative branch
-        Map<String, String> negativePath = new LinkedHashMap<>(currentSigns);
-        negativePath.put(node.getChannel(), "-");
-
-        if (node.getNegativeChildren().isEmpty()) {
-            result.put(node.getNegativeName(), new LinkedHashMap<>(negativePath));
         } else {
-            for (GateNode child : node.getNegativeChildren()) {
-                traceMarkerSigns(child, negativePath, result);
+            // Threshold gate: 2 branches (positive="+", negative="-")
+            String[] signs = {"+", "-"};
+            String channel = channels.isEmpty() ? "" : channels.get(0);
+            for (int i = 0; i < branches.size(); i++) {
+                Branch branch = branches.get(i);
+                Map<String, String> path = new LinkedHashMap<>(currentSigns);
+                if (!channel.isEmpty()) {
+                    path.put(channel, signs[i]);
+                }
+                if (branch.isLeaf()) {
+                    result.put(branch.getName(), new LinkedHashMap<>(path));
+                } else {
+                    for (GateNode child : branch.getChildren()) {
+                        traceMarkerSigns(child, path, result);
+                    }
+                }
             }
         }
     }
