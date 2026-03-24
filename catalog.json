@@ -10,7 +10,7 @@
       "releases": [
         {
           "name": "v0.5.0",
-          "main_url": "https://github.com/sceriff0/qupath-extension-flowpath/releases/download/v0.4.1/FlowPath-0.5.0.jar",
+          "main_url": "https://github.com/sceriff0/qupath-extension-flowpath/releases/download/v0.5.0/FlowPath-0.5.0.jar",
           "version_range": {
             "min": "v0.7.0"
           }
