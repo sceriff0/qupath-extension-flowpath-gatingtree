@@ -498,10 +498,12 @@ public class FlowPathPane extends BorderPane {
         // Don't call editorPane.setGateNode() — the editor already updated its
         // currentNode in the draw callback. Rebuilding would destroy the scatter plot.
         rebuildTreeView();
+        selectNodeInTree(newNode);
         requestPreviewUpdate();
     }
 
     private GateNode currentNode; // tracks currently selected gate for replacement
+    private boolean suppressTreeSelection = false;
 
     private void replaceInTree(List<GateNode> nodes, GateNode oldNode, GateNode newNode) {
         for (GateNode node : nodes) {
@@ -514,6 +516,25 @@ public class FlowPathPane extends BorderPane {
                 replaceInTree(branch.getChildren(), oldNode, newNode);
             }
         }
+    }
+
+    private void selectNodeInTree(GateNode node) {
+        suppressTreeSelection = true;
+        TreeItem<Object> item = findTreeItem(treeView.getRoot(), node);
+        if (item != null) {
+            treeView.getSelectionModel().select(item);
+        }
+        suppressTreeSelection = false;
+    }
+
+    private TreeItem<Object> findTreeItem(TreeItem<Object> parent, GateNode target) {
+        if (parent == null) return null;
+        if (parent.getValue() == target) return parent;
+        for (TreeItem<Object> child : parent.getChildren()) {
+            TreeItem<Object> found = findTreeItem(child, target);
+            if (found != null) return found;
+        }
+        return null;
     }
 
     private boolean removeFromTree(List<GateNode> nodes, GateNode target) {
@@ -529,6 +550,7 @@ public class FlowPathPane extends BorderPane {
     // --- Selection handling ---
 
     private void onTreeSelectionChanged(TreeItem<Object> selected) {
+        if (suppressTreeSelection) return;
         if (selected == null) {
             editorPane.setGateNode(null);
             return;
@@ -536,8 +558,10 @@ public class FlowPathPane extends BorderPane {
 
         Object item = selected.getValue();
         if (item instanceof GateNode node) {
+            currentNode = node;
             editorPane.setGateNode(node);
         } else if (item instanceof FlowPathCell.BranchItem branch) {
+            currentNode = branch.parentGate;
             editorPane.setGateNode(branch.parentGate);
         } else {
             editorPane.setGateNode(null);

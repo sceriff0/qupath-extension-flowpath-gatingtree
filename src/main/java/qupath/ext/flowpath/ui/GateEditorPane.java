@@ -665,11 +665,17 @@ public class GateEditorPane extends VBox {
     public void setCellIndex(CellIndex index) { this.cellIndex = index; }
     public void setMarkerStats(MarkerStats stats) {
         this.markerStats = stats;
-        if (currentNode != null) updateHistogram();
+        if (currentNode != null) {
+            updateHistogram();
+            refreshScatterPlot();
+        }
     }
     public void setRoiMask(boolean[] mask) {
         this.roiMask = mask;
-        if (currentNode != null) updateHistogram();
+        if (currentNode != null) {
+            updateHistogram();
+            refreshScatterPlot();
+        }
     }
     public void setOnNodeChanged(Consumer<GateNode> callback) { this.onNodeChanged = callback; }
     public void setOnAddToPositive(Runnable callback) { this.onAddToPositive = callback; }
@@ -829,6 +835,21 @@ public class GateEditorPane extends VBox {
         double loY = markerStats.getPercentileValue(chY, node.getClipPercentileLow());
         double hiY = markerStats.getPercentileValue(chY, node.getClipPercentileHigh());
         scatter.setAxisRange(loX, hiX, loY, hiY);
+    }
+
+    private void refreshScatterPlot() {
+        if (currentScatter == null || cellIndex == null || currentNode == null) return;
+        String chX = get2DChannelX(currentNode);
+        String chY = get2DChannelY(currentNode);
+        if (chX == null || chY == null) return;
+        int mxIdx = cellIndex.getMarkerIndex(chX);
+        int myIdx = cellIndex.getMarkerIndex(chY);
+        if (mxIdx < 0 || myIdx < 0) return;
+        double[][] filtered = getFilteredXY(mxIdx, myIdx);
+        currentScatter.setData(filtered[0], filtered[1], chX, chY);
+        if (markerStats != null) {
+            applyClipAxisRange(currentScatter, chX, chY, currentNode);
+        }
     }
 
     private String get2DChannelX(GateNode node) {
