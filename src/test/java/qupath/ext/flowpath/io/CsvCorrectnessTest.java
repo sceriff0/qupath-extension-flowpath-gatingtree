@@ -549,4 +549,351 @@ class CsvCorrectnessTest {
 
         assertFalse(loaded.getRoots().get(0).isEnabled());
     }
+
+    // ========== COMBINATION TESTS ==========
+
+    @Test
+    void qualityFilterPlusOutlierExclusion() throws IOException {
+        // QF excludes small cells, outlier exclusion excludes extreme marker values
+        // 50 normal cells + 2 QF-fail cells + 1 outlier cell = 53 total
+        int nNormal = 50;
+        List<String> markers = List.of("CD45");
+        double[] cd45 = new double[nNormal + 3];
+        double[] areas = new double[nNormal + 3];
+        for (int i = 0; i < nNormal; i++) {
+            cd45[i] = i + 1;  // 1..50
+            areas[i] = 100;
+        }
+        // 2 cells that fail QF (small area)
+        cd45[nNormal] = 25; areas[nNormal] = 5;
+        cd45[nNormal + 1] = 25; areas[nNormal + 1] = 5;
+        // 1 cell that is an outlier on CD45 (passes QF)
+        cd45[nNormal + 2] = -999; areas[nNormal + 2] = 100;
+
+        CellIndex index = buildIndex(markers, new double[][]{cd45}, areas);
+
+        QualityFilter qf = new QualityFilter();
+        qf.setMinArea(50);
+
+        boolean[] mask = GatingEngine.computeQualityMask(index, qf);
+        MarkerStats stats = MarkerStats.compute(index, mask);
+
+        GateNode gate = new GateNode("CD45", 25.0);
+        gate.setThresholdIsZScore(false);
+        gate.setExcludeOutliers(true);
+        gate.setClipPercentileLow(1.0);
+        gate.setClipPercentileHigh(99.0);
+
+        GateTree tree = new GateTree();
+        tree.setQualityFilter(qf);
+        tree.addRoot(gate);
+
+        CsvResult csv = run(tree, index, stats, false, "qf_outlier.csv");
+
+        // At least 2 excluded by QF + 1 outlier. Percentile clipping may exclude boundary cells too.
+        assertTrue(csv.rows.size() < nNormal + 3, "Some cells should be excluded");
+        assertTrue(csv.rows.size() >= nNormal - 2, "Most normal cells should survive");
+
+        // First cell (CD45=1) should be negative (below threshold 25)
+        assertEquals("CD45-", csv.val(0, "phenotype"));
+        // Outlier cell (-999) should NOT appear in CSV
+        for (int i = 0; i < csv.rows.size(); i++) {
+            assertNotEquals("-999.0000", csv.val(i, "CD45_raw"), "Outlier should be excluded from CSV");
+        }
+        // QF-failed cells (area=5) should NOT appear — check cell_id column
+        for (int i = 0; i < csv.rows.size(); i++) {
+            String id = csv.val(i, "cell_id");
+            assertNotEquals(String.valueOf(nNormal), id, "QF-fail cell should be excluded");
+            assertNotEquals(String.valueOf(nNormal + 1), id, "QF-fail cell should be excluded");
+        }
+    }
+
+    @Test
+    void qualityFilterPlusQuadrantGate() throws IOException {
+        // 6 cells: areas [10,100,100,100,100,100], QF minArea=50 excludes cell 0
+        List<String> markers = List.of("CD45", "CD3");
+        double[][] values = { {8, 8, 2, 8, 2, 2}, {8, 8, 8, 2, 2, 2} };
+        double[] areas = {10, 100, 100, 100, 100, 100};
+        CellIndex index = buildIndex(markers, values, areas);
+
+        QualityFilter qf = new QualityFilter();
+        qf.setMinArea(50);
+        boolean[] mask = GatingEngine.computeQualityMask(index, qf);
+        MarkerStats stats = MarkerStats.compute(index, mask);
+
+        QuadrantGate gate = new QuadrantGate("CD45", "CD3");
+        gate.setThresholdX(5.0);
+        gate.setThresholdY(5.0);
+        gate.setThresholdIsZScore(false);
+
+        GateTree tree = new GateTree();
+        tree.setQualityFilter(qf);
+        tree.addRoot(gate);
+
+        CsvResult csv = run(tree, index, stats, false, "qf_quad.csv");
+
+        assertEquals(5, csv.rows.size(), "Cell 0 excluded by QF");
+        // Cell 1: CD45=8,CD3=8 → PP
+        assertEquals("CD45+/CD3+", csv.val(0, "phenotype"));
+        assertEquals("+", csv.val(0, "CD45_sign"));
+        assertEquals("+", csv.val(0, "CD3_sign"));
+    }
+
+    @Test
+    void qualityFilterPlusRectangleGate() throws IOException {
+        List<String> markers = List.of("CD45", "CD3");
+        double[][] values = { {5, 5, 20}, {5, 5, 20} };
+        double[] areas = {10, 100, 100};
+        CellIndex index = buildIndex(markers, values, areas);
+
+        QualityFilter qf = new QualityFilter();
+        qf.setMinArea(50);
+        boolean[] mask = GatingEngine.computeQualityMask(index, qf);
+        MarkerStats stats = MarkerStats.compute(index, mask);
+
+        RectangleGate gate = new RectangleGate("CD45", "CD3", 2, 8, 2, 8);
+
+        GateTree tree = new GateTree();
+        tree.setQualityFilter(qf);
+        tree.addRoot(gate);
+
+        CsvResult csv = run(tree, index, stats, false, "qf_rect.csv");
+
+        assertEquals(2, csv.rows.size(), "Cell 0 excluded by QF");
+        String insideName = gate.getBranches().get(0).getName();
+        String outsideName = gate.getBranches().get(1).getName();
+        assertEquals(insideName, csv.val(0, "phenotype")); // (5,5) inside [2,8]x[2,8]
+        assertEquals(outsideName, csv.val(1, "phenotype")); // (20,20) outside
+    }
+
+    @Test
+    void disabledGatePlusQualityFilter() throws IOException {
+        // QF excludes cell 0 (area=10), disabled gate skips all, only enabled gate runs
+        List<String> markers = List.of("CD45", "CD3");
+        double[][] values = { {2, 8, 8}, {5, 5, 5} };
+        double[] areas = {10, 100, 100};
+        CellIndex index = buildIndex(markers, values, areas);
+
+        QualityFilter qf = new QualityFilter();
+        qf.setMinArea(50);
+        boolean[] mask = GatingEngine.computeQualityMask(index, qf);
+        MarkerStats stats = MarkerStats.compute(index, mask);
+
+        GateNode enabled = new GateNode("CD45", 5.0);
+        enabled.setThresholdIsZScore(false);
+        enabled.setEnabled(true);
+
+        GateNode disabled = new GateNode("CD3", 5.0);
+        disabled.setThresholdIsZScore(false);
+        disabled.setEnabled(false);
+
+        GateTree tree = new GateTree();
+        tree.setQualityFilter(qf);
+        tree.addRoot(enabled);
+        tree.addRoot(disabled);
+
+        CsvResult csv = run(tree, index, stats, false, "disabled_qf.csv");
+
+        assertEquals(2, csv.rows.size());
+        // Cell 1: CD45=8 >= 5 → CD45+, CD3 gate disabled
+        assertEquals("CD45+", csv.val(0, "phenotype"));
+        assertEquals("CD45+", csv.val(1, "phenotype"));
+    }
+
+    @Test
+    void quadrantNestedUnderThreshold() throws IOException {
+        // Root: CD45 threshold=5. CD45+ branch has a QuadrantGate on CD3 vs CD8
+        // Cell 0: CD45=2 → CD45-
+        // Cell 1: CD45=8, CD3=8, CD8=8 → CD45+ then quadrant PP
+        // Cell 2: CD45=8, CD3=2, CD8=8 → CD45+ then quadrant NP (CD3-/CD8+)
+        List<String> markers = List.of("CD45", "CD3", "CD8");
+        double[][] values = { {2, 8, 8}, {5, 8, 2}, {5, 8, 8} };
+        CellIndex index = buildIndex(markers, values, null);
+        MarkerStats stats = MarkerStats.compute(index, allTrueMask(3));
+
+        GateNode root = new GateNode("CD45", 5.0);
+        root.setThresholdIsZScore(false);
+
+        QuadrantGate quad = new QuadrantGate("CD3", "CD8");
+        quad.setThresholdX(5.0);
+        quad.setThresholdY(5.0);
+        quad.setThresholdIsZScore(false);
+        root.getPositiveChildren().add(quad);
+
+        GateTree tree = new GateTree();
+        tree.setQualityFilter(null);
+        tree.addRoot(root);
+
+        CsvResult csv = run(tree, index, stats, false, "thresh_quad.csv");
+
+        assertEquals(3, csv.rows.size());
+        assertEquals("CD45-", csv.val(0, "phenotype"));
+        assertEquals("-", csv.val(0, "CD45_sign"));
+
+        // Cell 1: CD45+, then CD3=8>=5 and CD8=8>=5 → PP
+        assertEquals("CD3+/CD8+", csv.val(1, "phenotype"));
+        assertEquals("+", csv.val(1, "CD45_sign"));
+        assertEquals("+", csv.val(1, "CD3_sign"));
+        assertEquals("+", csv.val(1, "CD8_sign"));
+
+        // Cell 2: CD45+, then CD3=2<5 and CD8=8>=5 → NP
+        assertEquals("CD3-/CD8+", csv.val(2, "phenotype"));
+        assertEquals("+", csv.val(2, "CD45_sign"));
+        assertEquals("-", csv.val(2, "CD3_sign"));
+        assertEquals("+", csv.val(2, "CD8_sign"));
+    }
+
+    @Test
+    void regionGateNestedUnderQuadrant() throws IOException {
+        // Root: Quadrant on CD45 vs CD3, thresholds 5,5
+        // On PP branch: Rectangle gate on CD8 vs CD4, bounds (4,4)-(10,10)
+        // Cell 0: CD45=8,CD3=8 → PP, CD8=5,CD4=5 → inside rectangle
+        // Cell 1: CD45=8,CD3=8 → PP, CD8=1,CD4=1 → outside rectangle
+        // Cell 2: CD45=2,CD3=2 → NN, no child → stays NN
+        List<String> markers = List.of("CD45", "CD3", "CD8", "CD4");
+        double[][] values = {
+            {8, 8, 2}, {8, 8, 2}, {5, 1, 5}, {5, 1, 5}
+        };
+        CellIndex index = buildIndex(markers, values, null);
+        MarkerStats stats = MarkerStats.compute(index, allTrueMask(3));
+
+        QuadrantGate quad = new QuadrantGate("CD45", "CD3");
+        quad.setThresholdX(5.0);
+        quad.setThresholdY(5.0);
+        quad.setThresholdIsZScore(false);
+
+        RectangleGate rect = new RectangleGate("CD8", "CD4", 4, 10, 4, 10);
+        quad.getBranches().get(0).getChildren().add(rect); // PP branch
+
+        GateTree tree = new GateTree();
+        tree.setQualityFilter(null);
+        tree.addRoot(quad);
+
+        CsvResult csv = run(tree, index, stats, false, "quad_rect.csv");
+
+        assertEquals(3, csv.rows.size());
+        // Cell 0: PP → inside rect
+        String insideName = rect.getBranches().get(0).getName();
+        assertEquals(insideName, csv.val(0, "phenotype"));
+        assertEquals("+", csv.val(0, "CD45_sign"));
+        assertEquals("+", csv.val(0, "CD3_sign"));
+        assertEquals("+", csv.val(0, "CD8_sign"));
+        assertEquals("+", csv.val(0, "CD4_sign"));
+
+        // Cell 2: NN
+        assertEquals("CD45-/CD3-", csv.val(2, "phenotype"));
+    }
+
+    @Test
+    void outlierOnBothChannelsOfRectanglePlusCsv() throws IOException {
+        // 5 cells: normal values [1..5] on both channels, plus one outlier on X only, one on Y only
+        List<String> markers = List.of("CD45", "CD3");
+        double[][] values = {
+            {3, 3, 3, -100, 3},   // CD45: cell 3 is X-outlier
+            {3, 3, 3, 3, -100}    // CD3: cell 4 is Y-outlier
+        };
+        CellIndex index = buildIndex(markers, values, null);
+        MarkerStats stats = MarkerStats.compute(index, allTrueMask(5));
+
+        RectangleGate gate = new RectangleGate("CD45", "CD3", 0, 10, 0, 10);
+        gate.setExcludeOutliers(true);
+        gate.setClipPercentileLow(1.0);
+        gate.setClipPercentileHigh(99.0);
+
+        GateTree tree = new GateTree();
+        tree.setQualityFilter(null);
+        tree.addRoot(gate);
+
+        CsvResult csv = run(tree, index, stats, false, "outlier_xy.csv");
+
+        // Cells 3 and 4 excluded by outlier on X and Y respectively
+        assertEquals(3, csv.rows.size(), "2 outlier cells excluded, 3 remaining");
+    }
+
+    @Test
+    void fullRealisticPipelineWithAllFilters() throws IOException {
+        // Realistic scenario: 100 cells, QF + outlier + 3-level hierarchy + disabled gate
+        // Markers: CD45, CD3, CD8, CD20
+        int n = 100;
+        List<String> markers = List.of("CD45", "CD3", "CD8", "CD20");
+        double[] cd45 = new double[n];
+        double[] cd3 = new double[n];
+        double[] cd8 = new double[n];
+        double[] cd20 = new double[n];
+        double[] areas = new double[n];
+
+        for (int i = 0; i < n; i++) {
+            cd45[i] = i * 2;        // 0,2,4,...,38
+            cd3[i] = (i % 2 == 0) ? 8 : 2;  // alternating high/low
+            cd8[i] = i;              // 0..19
+            cd20[i] = n - i;         // 20..1
+            areas[i] = 50 + i * 5;   // 50,55,...,145
+        }
+        // Cell 99 is an outlier on CD45
+        cd45[n - 1] = -500;
+
+        CellIndex index = buildIndex(markers, new double[][]{cd45, cd3, cd8, cd20}, areas);
+
+        // QF: minArea=60 → excludes cells 0,1 (areas 50, 55)
+        QualityFilter qf = new QualityFilter();
+        qf.setMinArea(60);
+        boolean[] mask = GatingEngine.computeQualityMask(index, qf);
+        MarkerStats stats = MarkerStats.compute(index, mask);
+
+        // Root: CD45 threshold=15 (raw), excludeOutliers
+        GateNode root = new GateNode("CD45", 15.0);
+        root.setThresholdIsZScore(false);
+        root.setExcludeOutliers(true);
+        root.setClipPercentileLow(1.0);
+        root.setClipPercentileHigh(99.0);
+
+        // Child on CD45+: CD3 threshold=5 (raw)
+        GateNode cd3gate = new GateNode("CD3", 5.0);
+        cd3gate.setThresholdIsZScore(false);
+        root.getPositiveChildren().add(cd3gate);
+
+        // Disabled root: CD20 (should be skipped)
+        GateNode disabledGate = new GateNode("CD20", 10.0);
+        disabledGate.setThresholdIsZScore(false);
+        disabledGate.setEnabled(false);
+
+        GateTree tree = new GateTree();
+        tree.setQualityFilter(qf);
+        tree.addRoot(root);
+        tree.addRoot(disabledGate);
+
+        CsvResult csv = run(tree, index, stats, false, "full_pipeline.csv");
+
+        // QF excludes cells 0,1 (areas 50, 55)
+        // Outlier excludes cell 99 (CD45=-500)
+        // Percentile clipping may exclude a few boundary cells too
+        assertTrue(csv.rows.size() < n, "Some cells should be excluded");
+        assertTrue(csv.rows.size() >= n - 5, "Most cells should survive");
+
+        // All rows should have CD45, CD3, CD8, CD20 raw columns (all markers)
+        assertTrue(csv.header.contains("CD20_raw"), "Ungated CD20 should still appear in CSV");
+        assertTrue(csv.header.contains("CD8_raw"), "Ungated CD8 should still appear in CSV");
+
+        // Verify phenotype correctness: early cells with low CD45 should be CD45-
+        // Find a cell that's clearly below threshold (CD45 < 15 = cell indices with cd45[i] < 15)
+        boolean foundNeg = false, foundPos = false;
+        for (int i = 0; i < csv.rows.size(); i++) {
+            double rawCd45 = Double.parseDouble(csv.val(i, "CD45_raw"));
+            String pheno = csv.val(i, "phenotype");
+            if (rawCd45 < 15) {
+                assertTrue(pheno.equals("CD45-"), "Cell with CD45=" + rawCd45 + " should be CD45-, got " + pheno);
+                foundNeg = true;
+            } else if (rawCd45 >= 15) {
+                // These cells went through CD3 child gate
+                assertTrue(pheno.equals("CD3+") || pheno.equals("CD3-"),
+                    "Cell with CD45=" + rawCd45 + " should be CD3+/-, got " + pheno);
+                foundPos = true;
+            }
+        }
+        assertTrue(foundNeg, "Should have some CD45- cells");
+        assertTrue(foundPos, "Should have some CD45+ cells going through CD3 child");
+
+        // CD20 should have empty sign for all cells (disabled gate)
+        assertEquals("", csv.val(0, "CD20_sign"));
+    }
 }
