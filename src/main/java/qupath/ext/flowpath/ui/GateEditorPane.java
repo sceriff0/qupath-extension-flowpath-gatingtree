@@ -8,7 +8,6 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
-import qupath.ext.flowpath.model.BooleanGate;
 import qupath.ext.flowpath.model.Branch;
 import qupath.ext.flowpath.model.CellIndex;
 import qupath.ext.flowpath.model.ColorUtils;
@@ -261,8 +260,6 @@ public class GateEditorPane extends VBox {
             gateSpecificArea.getChildren().clear();
             if (node instanceof QuadrantGate qg) {
                 buildQuadrantEditor(qg);
-            } else if (node instanceof BooleanGate bg) {
-                buildBooleanEditor(bg);
             } else if (node instanceof PolygonGate || node instanceof RectangleGate || node instanceof EllipseGate) {
                 build2DEditor(node);
             } else {
@@ -276,9 +273,7 @@ public class GateEditorPane extends VBox {
             buildActionButtons(node);
         });
 
-        if (!(node instanceof BooleanGate)) {
-            updateHistogram();
-        }
+        updateHistogram();
     }
 
     // ---- Gate-type-specific editor builders ----
@@ -375,66 +370,6 @@ public class GateEditorPane extends VBox {
                 chYCombo.setOnAction(e -> { if (!suppressEvents) { gate.setChannelY(chYCombo.getValue()); refreshScatter.run(); fireNodeChanged(); }});
             }
         }
-    }
-
-    private void buildBooleanEditor(BooleanGate gate) {
-        Label opLabel = new Label("Operation:");
-        opLabel.setStyle("-fx-text-fill: white;");
-        ComboBox<String> opCombo = new ComboBox<>();
-        opCombo.getItems().addAll("AND", "OR", "NOT");
-        opCombo.setValue(gate.getOperation().name());
-        opCombo.setOnAction(e -> {
-            if (!suppressEvents) {
-                gate.setOperation(BooleanGate.Op.valueOf(opCombo.getValue()));
-                fireNodeChanged();
-            }
-        });
-
-        // Clear explanation of how Boolean gates work
-        String opName = gate.getOperation().name();
-        String explanation = switch (opName) {
-            case "AND" -> "A cell must pass ALL operand gates to be classified as 'Match'.\n\n"
-                + "Example: AND(CD45, CD3) = cells that are both CD45+ and CD3+.";
-            case "OR" -> "A cell must pass AT LEAST ONE operand gate to be 'Match'.\n\n"
-                + "Example: OR(CD4, CD8) = cells that are CD4+ or CD8+ (or both).";
-            case "NOT" -> "A cell must FAIL the first operand gate to be 'Match'.\n\n"
-                + "Example: NOT(CD45) = cells that are CD45-negative.";
-            default -> "";
-        };
-        Label info = new Label(explanation);
-        info.setStyle("-fx-text-fill: #aaaaaa; -fx-font-size: 10;");
-        info.setWrapText(true);
-
-        // Show current operands
-        List<GateNode> operands = gate.getOperands();
-        Label operandHeader = new Label("Operands (" + operands.size() + "):");
-        operandHeader.setStyle("-fx-text-fill: white; -fx-font-weight: bold;");
-
-        VBox operandList = new VBox(2);
-        if (operands.isEmpty()) {
-            Label none = new Label("No operands yet. Add child gates under this\nBoolean gate's branches — they become operands.");
-            none.setStyle("-fx-text-fill: #888888; -fx-font-size: 10;");
-            none.setWrapText(true);
-            operandList.getChildren().add(none);
-        } else {
-            for (GateNode op : operands) {
-                String desc = op.getChannel() != null ? op.getChannel() : op.getGateType();
-                Label opItem = new Label("  - " + desc);
-                opItem.setStyle("-fx-text-fill: #b0c0d0;");
-                operandList.getChildren().add(opItem);
-            }
-        }
-
-        Label howTo = new Label("How to use: add Threshold or other gates as children\n"
-            + "of this Boolean gate's 'Match' or 'No Match' branches.\n"
-            + "The operands list above shows gates being combined.");
-        howTo.setStyle("-fx-text-fill: #666666; -fx-font-size: 9;");
-        howTo.setWrapText(true);
-
-        gateSpecificArea.getChildren().addAll(
-            new HBox(8, opLabel, opCombo),
-            info, new Separator(), operandHeader, operandList, new Separator(), howTo
-        );
     }
 
     private void build2DEditor(GateNode node) {
@@ -587,8 +522,6 @@ public class GateEditorPane extends VBox {
             String labelText;
             if (node instanceof QuadrantGate) {
                 labelText = new String[]{"Q1 (++):", "Q2 (-+):", "Q3 (+-):", "Q4 (--):"} [Math.min(i, 3)];
-            } else if (node instanceof BooleanGate) {
-                labelText = i == 0 ? "Match:" : "No Match:";
             } else if (node instanceof PolygonGate || node instanceof RectangleGate || node instanceof EllipseGate) {
                 labelText = i == 0 ? "Inside:" : "Outside:";
             } else {

@@ -10,7 +10,6 @@ import java.util.List;
  * ThresholdGate has 2 branches (positive/negative).
  * QuadrantGate has 4 branches (++, +-, -+, --).
  * Region gates (polygon/rectangle/ellipse) have 2 branches (inside/outside).
- * BooleanGate has 2 branches (match/no-match).
  */
 public class Branch {
 

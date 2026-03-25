@@ -15,7 +15,6 @@ import qupath.ext.flowpath.engine.GatingEngine;
 import qupath.ext.flowpath.engine.LivePreviewService;
 import qupath.ext.flowpath.io.FlowPathSerializer;
 import qupath.ext.flowpath.io.PhenotypeCsvExporter;
-import qupath.ext.flowpath.model.BooleanGate;
 import qupath.ext.flowpath.model.Branch;
 import qupath.ext.flowpath.model.CellIndex;
 import qupath.ext.flowpath.model.EllipseGate;
@@ -437,7 +436,7 @@ public class FlowPathPane extends BorderPane {
      * Returns null if the user cancels.
      */
     private GateNode promptForNewGate() {
-        List<String> gateTypes = List.of("Threshold", "Quadrant", "Region", "Boolean");
+        List<String> gateTypes = List.of("Threshold", "Quadrant", "Region");
         ChoiceDialog<String> dialog = new ChoiceDialog<>("Threshold", gateTypes);
         dialog.setTitle("Add Gate");
         dialog.setHeaderText("Select gate type");
@@ -453,7 +452,6 @@ public class FlowPathPane extends BorderPane {
             case "Threshold" -> new GateNode(ch);
             case "Quadrant" -> new QuadrantGate(ch, ch2);
             case "Region" -> new PolygonGate(ch, ch2);
-            case "Boolean" -> new BooleanGate(BooleanGate.Op.AND, "Boolean");
             default -> new GateNode(ch);
         };
     }

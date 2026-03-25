@@ -6,7 +6,6 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import qupath.ext.flowpath.model.BooleanGate;
 import qupath.ext.flowpath.model.Branch;
 import qupath.ext.flowpath.model.ColorUtils;
 import qupath.ext.flowpath.model.GateNode;
@@ -164,20 +163,7 @@ public class FlowPathSerializer {
         obj.addProperty("clipPercentileHigh", node.getClipPercentileHigh());
         obj.addProperty("excludeOutliers", node.isExcludeOutliers());
 
-        if (node instanceof BooleanGate bg) {
-            obj.addProperty("operation", bg.getOperation().name());
-            obj.add("operands", serializeNodeList(bg.getOperands()));
-            // Serialize 2 branches (match/no-match)
-            JsonArray branches = new JsonArray();
-            for (Branch b : bg.getBranches()) {
-                JsonObject bo = new JsonObject();
-                bo.addProperty("name", b.getName());
-                bo.add("color", ColorUtils.toJsonArray(b.getColor()));
-                bo.add("children", serializeNodeList(b.getChildren()));
-                branches.add(bo);
-            }
-            obj.add("branches", branches);
-        } else if (node instanceof PolygonGate pg) {
+        if (node instanceof PolygonGate pg) {
             obj.addProperty("channelX", pg.getChannelX());
             obj.addProperty("channelY", pg.getChannelY());
             JsonArray verts = new JsonArray();
@@ -260,8 +246,6 @@ public class FlowPathSerializer {
         GateNode result;
         if ("quadrant".equals(type)) {
             result = deserializeQuadrantNode(obj, clipLow, clipHigh, excludeOutliers);
-        } else if ("boolean".equals(type)) {
-            result = deserializeBooleanNode(obj, clipLow, clipHigh, excludeOutliers);
         } else if ("polygon".equals(type)) {
             result = deserialize2DNode(new PolygonGate(), obj, clipLow, clipHigh, excludeOutliers);
         } else if ("rectangle".equals(type)) {
@@ -371,35 +355,6 @@ public class FlowPathSerializer {
         }
 
         // Deserialize branches
-        if (obj.has("branches")) {
-            JsonArray branches = obj.getAsJsonArray("branches");
-            List<Branch> gateBranches = gate.getBranches();
-            for (int i = 0; i < branches.size() && i < gateBranches.size(); i++) {
-                JsonObject bo = branches.get(i).getAsJsonObject();
-                Branch b = gateBranches.get(i);
-                if (bo.has("name")) b.setName(bo.get("name").getAsString());
-                if (bo.has("color")) b.setColor(ColorUtils.fromJsonArray(bo.getAsJsonArray("color")));
-                if (bo.has("children")) b.setChildren(deserializeNodeList(bo.getAsJsonArray("children")));
-            }
-        }
-
-        return gate;
-    }
-
-    private static BooleanGate deserializeBooleanNode(JsonObject obj,
-                                                       double clipLow, double clipHigh, boolean excludeOutliers) {
-        BooleanGate gate = new BooleanGate();
-        gate.setClipPercentileLow(clipLow);
-        gate.setClipPercentileHigh(clipHigh);
-        gate.setExcludeOutliers(excludeOutliers);
-
-        if (obj.has("operation")) {
-            gate.setOperation(BooleanGate.Op.valueOf(obj.get("operation").getAsString()));
-        }
-        if (obj.has("operands")) {
-            gate.setOperands(deserializeNodeList(obj.getAsJsonArray("operands")));
-        }
-
         if (obj.has("branches")) {
             JsonArray branches = obj.getAsJsonArray("branches");
             List<Branch> gateBranches = gate.getBranches();

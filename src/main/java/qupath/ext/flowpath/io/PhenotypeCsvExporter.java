@@ -1,7 +1,6 @@
 package qupath.ext.flowpath.io;
 
 import qupath.ext.flowpath.engine.GatingEngine;
-import qupath.ext.flowpath.model.BooleanGate;
 import qupath.ext.flowpath.model.Branch;
 import qupath.ext.flowpath.model.CellIndex;
 import qupath.ext.flowpath.model.GateNode;

@@ -6,7 +6,6 @@ import qupath.ext.flowpath.model.GateNode;
 import qupath.ext.flowpath.model.GateTree;
 import qupath.ext.flowpath.model.MarkerStats;
 import qupath.ext.flowpath.model.QualityFilter;
-import qupath.ext.flowpath.model.BooleanGate;
 import qupath.ext.flowpath.model.EllipseGate;
 import qupath.ext.flowpath.model.PolygonGate;
 import qupath.ext.flowpath.model.QuadrantGate;
@@ -203,8 +202,6 @@ public final class GatingEngine {
         if (!node.isEnabled()) return;
         if (node instanceof QuadrantGate qg) {
             walkQuadrantNode(qg, cellIdx, index, stats, useZScore, phenotypes, excluded, colors);
-        } else if (node instanceof BooleanGate bg) {
-            walkBooleanNode(bg, cellIdx, index, stats, useZScore, phenotypes, excluded, colors);
         } else if (node instanceof PolygonGate || node instanceof RectangleGate || node instanceof EllipseGate) {
             walk2DNode(node, cellIdx, index, stats, useZScore, phenotypes, excluded, colors);
         } else {
@@ -324,72 +321,6 @@ public final class GatingEngine {
         Branch branch = inside ? node.getBranches().get(0) : node.getBranches().get(1);
         branch.setCount(branch.getCount() + 1);
         assignBranch(branch, cellIdx, index, stats, useZScore, phenotypes, excluded, colors);
-    }
-
-    private static void walkBooleanNode(BooleanGate gate, int cellIdx,
-                                          CellIndex index, MarkerStats stats, boolean useZScore,
-                                          String[] phenotypes, boolean[] excluded, int[] colors) {
-        // Evaluate each operand gate against this cell to determine pass/fail
-        boolean result;
-        List<GateNode> operands = gate.getOperands();
-
-        if (operands.isEmpty()) {
-            result = false;
-        } else {
-            switch (gate.getOperation()) {
-                case AND -> {
-                    result = true;
-                    for (GateNode op : operands) {
-                        if (!evaluateOperandPass(op, cellIdx, index, stats, useZScore)) {
-                            result = false;
-                            break;
-                        }
-                    }
-                }
-                case OR -> {
-                    result = false;
-                    for (GateNode op : operands) {
-                        if (evaluateOperandPass(op, cellIdx, index, stats, useZScore)) {
-                            result = true;
-                            break;
-                        }
-                    }
-                }
-                case NOT -> {
-                    result = !evaluateOperandPass(operands.get(0), cellIdx, index, stats, useZScore);
-                }
-                default -> result = false;
-            }
-        }
-
-        Branch branch = result ? gate.getBranches().get(0) : gate.getBranches().get(1);
-        branch.setCount(branch.getCount() + 1);
-        assignBranch(branch, cellIdx, index, stats, useZScore, phenotypes, excluded, colors);
-    }
-
-    /**
-     * Evaluate whether a cell passes a gate (would fall into the positive/first branch).
-     * Used by BooleanGate to check operand results.
-     */
-    private static boolean evaluateOperandPass(GateNode gate, int cellIdx,
-                                                CellIndex index, MarkerStats stats, boolean useZScore) {
-        if (gate instanceof QuadrantGate qg) {
-            int mxIdx = index.getMarkerIndex(qg.getChannelX());
-            int myIdx = index.getMarkerIndex(qg.getChannelY());
-            if (mxIdx < 0 || myIdx < 0) return false;
-            double vx = useZScore ? stats.toZScore(qg.getChannelX(), index.getMarkerValues(mxIdx)[cellIdx])
-                                  : index.getMarkerValues(mxIdx)[cellIdx];
-            double vy = useZScore ? stats.toZScore(qg.getChannelY(), index.getMarkerValues(myIdx)[cellIdx])
-                                  : index.getMarkerValues(myIdx)[cellIdx];
-            return qg.evaluateQuadrant(vx, vy) == 0; // PP quadrant = "positive"
-        }
-        // Threshold gate: positive = value >= threshold
-        String channel = gate.getChannel();
-        int markerIdx = index.getMarkerIndex(channel);
-        if (markerIdx < 0) return false;
-        double rawValue = index.getMarkerValues(markerIdx)[cellIdx];
-        double compareValue = useZScore ? stats.toZScore(channel, rawValue) : rawValue;
-        return compareValue >= gate.getThreshold();
     }
 
     private static void assignBranch(Branch branch, int cellIdx,
