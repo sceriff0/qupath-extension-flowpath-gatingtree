@@ -33,7 +33,6 @@ public class GateEditorPane extends VBox {
 
     // --- Shared controls ---
     private final Label gateTypeLabel;
-    private final CheckBox enabledCheckBox;
     private final Spinner<Double> clipLowSpinner;
     private final Spinner<Double> clipHighSpinner;
     private final CheckBox excludeOutliersBox;
@@ -69,20 +68,9 @@ public class GateEditorPane extends VBox {
         setPadding(new Insets(10));
         setStyle("-fx-background-color: #2a2a2a;");
 
-        // Gate type indicator and enabled toggle
+        // Gate type indicator
         gateTypeLabel = new Label("No gate selected");
         gateTypeLabel.setStyle("-fx-text-fill: #80b0d0; -fx-font-size: 11; -fx-font-weight: bold;");
-
-        enabledCheckBox = new CheckBox("Enabled");
-        enabledCheckBox.setSelected(true);
-        enabledCheckBox.setStyle("-fx-text-fill: white;");
-        enabledCheckBox.setTooltip(new Tooltip("When disabled, this gate is skipped during classification"));
-        enabledCheckBox.selectedProperty().addListener((obs, old, val) -> {
-            if (!suppressEvents && currentNode != null) {
-                currentNode.setEnabled(val);
-                fireNodeChanged();
-            }
-        });
 
         // --- Threshold-specific controls (always created, shown/hidden as needed) ---
         channelCombo = new ComboBox<>();
@@ -218,11 +206,8 @@ public class GateEditorPane extends VBox {
         });
 
         // Assemble
-        HBox headerRow = new HBox(12, gateTypeLabel, enabledCheckBox);
-        headerRow.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
-
         getChildren().addAll(
-            headerRow,
+            gateTypeLabel,
             gateSpecificArea,
             createSectionHeader("Outlier Clipping"), clipRow,
             new Separator(),
@@ -256,7 +241,6 @@ public class GateEditorPane extends VBox {
             setDisabled(false);
 
             // Shared controls
-            enabledCheckBox.setSelected(node.isEnabled());
             clipLowSpinner.getValueFactory().setValue(node.getClipPercentileLow());
             clipHighSpinner.getValueFactory().setValue(node.getClipPercentileHigh());
             excludeOutliersBox.setSelected(node.isExcludeOutliers());
@@ -477,7 +461,20 @@ public class GateEditorPane extends VBox {
         rectBtn.setToggleGroup(toolGroup);
         ToggleButton ellipseBtn = new ToggleButton("Ellipse");
         ellipseBtn.setToggleGroup(toolGroup);
-        HBox drawToolbar = new HBox(4, polygonBtn, rectBtn, ellipseBtn);
+        Button clearShapeBtn = new Button("Clear Shape");
+        clearShapeBtn.setOnAction(e -> {
+            if (node instanceof PolygonGate pg) {
+                pg.setVertices(List.of());
+            } else if (node instanceof RectangleGate rg) {
+                rg.setMinX(0); rg.setMaxX(0); rg.setMinY(0); rg.setMaxY(0);
+            } else if (node instanceof EllipseGate eg) {
+                eg.setCenterX(0); eg.setCenterY(0); eg.setRadiusX(0); eg.setRadiusY(0);
+            }
+            // Rebuild the editor to show fresh scatter (no overlay)
+            setGateNode(node);
+            fireNodeChanged();
+        });
+        HBox drawToolbar = new HBox(4, polygonBtn, rectBtn, ellipseBtn, clearShapeBtn);
 
         if (node instanceof PolygonGate) polygonBtn.setSelected(true);
         else if (node instanceof RectangleGate) rectBtn.setSelected(true);
@@ -672,13 +669,6 @@ public class GateEditorPane extends VBox {
     public void setRoiMask(boolean[] mask) {
         this.roiMask = mask;
         if (currentNode != null) updateHistogram();
-    }
-    public void syncEnabled(GateNode node) {
-        if (node == currentNode) {
-            suppressEvents = true;
-            enabledCheckBox.setSelected(node.isEnabled());
-            suppressEvents = false;
-        }
     }
     public void setOnNodeChanged(Consumer<GateNode> callback) { this.onNodeChanged = callback; }
     public void setOnAddToPositive(Runnable callback) { this.onAddToPositive = callback; }

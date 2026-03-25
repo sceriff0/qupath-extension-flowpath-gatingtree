@@ -73,6 +73,7 @@ public class FlowPathPane extends BorderPane {
     private boolean[] cachedQualityMask;
     private boolean[] cachedRoiMask;
     private PathObjectHierarchyListener hierarchyListener;
+    private boolean suppressRoiComboEvents = false;
     private ImageData<?> listenerImageData;
 
     public FlowPathPane(QuPathGUI qupath) {
@@ -113,7 +114,7 @@ public class FlowPathPane extends BorderPane {
         roiComboBox.getItems().add(ALL_CELLS);
         roiComboBox.getSelectionModel().select(0);
         roiComboBox.setMaxWidth(Double.MAX_VALUE);
-        roiComboBox.setOnAction(e -> onRoiSelectionChanged());
+        roiComboBox.setOnAction(e -> { if (!suppressRoiComboEvents) onRoiSelectionChanged(); });
         roiComboBox.setStyle("-fx-text-fill: black;");
         roiComboBox.setCellFactory(lv -> new ListCell<>() {
             @Override protected void updateItem(AnnotationItem item, boolean empty) {
@@ -520,6 +521,8 @@ public class FlowPathPane extends BorderPane {
     // --- ROI filtering ---
 
     private void refreshAnnotationList() {
+        suppressRoiComboEvents = true;
+        try {
         ImageData<?> imageData = qupath.getImageData();
         AnnotationItem currentSelection = roiComboBox.getValue();
         String currentId = (currentSelection != null) ? currentSelection.id() : null;
@@ -545,6 +548,9 @@ public class FlowPathPane extends BorderPane {
             }
         }
         roiComboBox.getSelectionModel().select(0);
+        } finally {
+            suppressRoiComboEvents = false;
+        }
     }
 
     private void recomputeRoiMask() {
@@ -604,7 +610,6 @@ public class FlowPathPane extends BorderPane {
     private void onGateEnabledToggled(GateNode node) {
         pushUndoCoalesced();
         requestPreviewUpdate();
-        editorPane.syncEnabled(node);
     }
 
     private void onQualityFilterChanged() {

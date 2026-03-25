@@ -296,6 +296,17 @@ public final class GatingEngine {
 
         double rawX = index.getMarkerValues(mxIdx)[cellIdx];
         double rawY = index.getMarkerValues(myIdx)[cellIdx];
+
+        // Outlier exclusion (same semantics as threshold/quadrant gates)
+        if (node.isExcludeOutliers()) {
+            double loX = stats.getPercentileValue(chX, node.getClipPercentileLow());
+            double hiX = stats.getPercentileValue(chX, node.getClipPercentileHigh());
+            if (rawX < loX || rawX > hiX) { excluded[cellIdx] = true; return; }
+            double loY = stats.getPercentileValue(chY, node.getClipPercentileLow());
+            double hiY = stats.getPercentileValue(chY, node.getClipPercentileHigh());
+            if (rawY < loY || rawY > hiY) { excluded[cellIdx] = true; return; }
+        }
+
         double vx = useZScore ? stats.toZScore(chX, rawX) : rawX;
         double vy = useZScore ? stats.toZScore(chY, rawY) : rawY;
 
