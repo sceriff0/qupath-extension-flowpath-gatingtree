@@ -4,21 +4,24 @@
 [![Java](https://img.shields.io/badge/Java-25-orange.svg)](https://jdk.java.net/25/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-Interactive tree-based cell phenotyping gating for [QuPath](https://qupath.github.io/). Build hierarchical marker gates with live histogram visualization, drag thresholds, and see cells update in real time on multiplexed imaging data (CODEX, MIBI, mIF).
+Interactive tree-based cell phenotyping for [QuPath](https://qupath.github.io/). Build hierarchical marker gates with live visualization, drag thresholds, draw 2D regions, and see cells update in real time on multiplexed imaging data (CODEX, MIBI, mIF).
 
 Designed to work with the [mirage](https://github.com/sceriff0/mirage) pipeline for end-to-end multiplexed image analysis — from raw images to cell phenotypes.
 
-![Screenshot](screenshot.png)
+<!-- Add screenshots here -->
 
 ## Features
 
 - **Hierarchical gating** — Multi-level gate tree (e.g., CD45+ > CD3+ > CD8+ = "T cytotoxic")
-- **Live histogram** — Per-marker histogram with draggable threshold and percentile clipping
+- **Multiple gate types** — Threshold (1D), quadrant (2D dual-threshold), polygon, rectangle, and ellipse gates
+- **Live histogram & scatter plots** — Per-marker histogram with draggable threshold; 2D scatter plots with interactive gate drawing and crosshair visualization for quadrant gates
 - **Real-time preview** — Cells update color and phenotype within ~100ms
 - **Raw / Z-score toggle** — Switch value modes per gate
-- **Quality filters** — Pre-gating QC: area, eccentricity, solidity, total intensity
-- **Outlier exclusion** — Per-gate percentile clipping with cell exclusion
-- **Save / Load / Export** — Gate trees as JSON, phenotypes as CSV
+- **Quality filters** — Pre-gating QC with min+max for area, eccentricity, solidity, total intensity, and perimeter
+- **Outlier exclusion** — Per-gate percentile clipping with scatter plot axis zoom to clipped range
+- **Undo / Redo** — Snapshot-based undo stack (Ctrl+Z / Ctrl+Shift+Z)
+- **Drag-and-drop reordering** — Rearrange gates in the tree by dragging between branches
+- **Save / Load / Export** — Gate trees as JSON (backward-compatible), phenotypes as CSV
 
 ## Installation
 
@@ -39,7 +42,7 @@ Download the latest JAR from [Releases](../../releases) and drag it onto QuPath.
 git clone https://github.com/sceriff0/qupath-extension-flowpath.git
 cd qupath-extension-flowpath
 ./gradlew build
-# JAR at build/libs/FlowPath-0.4.1.jar → drag onto QuPath
+# JAR at build/libs/FlowPath-1.0.0.jar → drag onto QuPath
 ```
 
 ## Quick Start
@@ -47,11 +50,13 @@ cd qupath-extension-flowpath
 1. Open your pyramidal OME-TIFF in QuPath
 2. Import cell detections (GeoJSON with marker intensities, e.g., from [mirage](https://github.com/sceriff0/mirage))
 3. `Extensions` > `FlowPath` (or `Ctrl+G`)
-4. Set quality filters to remove segmentation artifacts
-5. Add root gate → select channel → drag threshold on histogram
-6. Build hierarchy: "Add Gate to +" for sub-gating positive populations
-7. Name leaf nodes (e.g., "T cytotoxic", "Stroma")
-8. Export CSV
+4. Set quality filters to remove segmentation artifacts (area, eccentricity, solidity, perimeter, total intensity)
+5. Add root gate → pick gate type (threshold, quadrant, polygon, rectangle, ellipse)
+6. For threshold gates: select channel → drag threshold on histogram
+7. For 2D gates: select X/Y channels → draw region on scatter plot
+8. Build hierarchy: add child gates to branches for sub-gating
+9. Name leaf nodes (e.g., "T cytotoxic", "Stroma")
+10. Export CSV
 
 ## Output Formats
 
@@ -71,7 +76,7 @@ Excluded cells (QC-filtered or outlier-excluded) are omitted when "Exclude from 
 
 If you use this tool in your research, please cite:
 
-> FlowPath: Interactive tree-based cell phenotyping gating for QuPath. (2025). https://github.com/sceriff0/qupath-extension-flowpath
+> FlowPath: Interactive tree-based cell phenotyping for QuPath. (2025). https://github.com/sceriff0/qupath-extension-flowpath
 
 ## License
 
