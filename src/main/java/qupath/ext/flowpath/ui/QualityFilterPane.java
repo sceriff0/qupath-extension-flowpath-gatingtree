@@ -144,7 +144,9 @@ public class QualityFilterPane extends TitledPane {
             double range = slider.getMax() - slider.getMin();
             // "off" when slider is within 0.1% of its max (works for both [0,1] and [0,50000] ranges)
             if (v >= slider.getMax() - range * 0.001) {
-                setter.accept(Double.MAX_VALUE);
+                // For [0,1] bounded sliders (eccentricity, solidity), use the natural max (1.0)
+                // instead of Double.MAX_VALUE to keep serialized JSON clean
+                setter.accept(slider.getMax() <= 1.0 ? slider.getMax() : Double.MAX_VALUE);
                 label.setText("off");
             } else {
                 setter.accept(v);

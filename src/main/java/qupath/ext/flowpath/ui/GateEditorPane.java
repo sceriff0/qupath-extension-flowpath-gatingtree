@@ -55,6 +55,8 @@ public class GateEditorPane extends VBox {
     private MarkerStats markerStats;
     private boolean[] roiMask;
     private boolean suppressEvents = false;
+    // Non-null only when a 2D gate editor (quadrant/polygon/rect/ellipse) is active.
+    // Used by shared clip controls to update axis range. Cleared in setGateNode().
     private ScatterPlotCanvas currentScatter;
 
     private Consumer<GateNode> onNodeChanged;
