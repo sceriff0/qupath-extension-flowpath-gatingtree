@@ -827,6 +827,7 @@ public class FlowPathPane extends BorderPane {
         File file = Dialogs.promptForFile("Load Template", null, "JSON", ".json");
         if (file == null) return;
         try {
+            pushUndo();
             GateTree templateTree = FlowPathSerializer.load(file);
             // Merge template gates into current tree (add as roots)
             for (GateNode root : templateTree.getRoots()) {
