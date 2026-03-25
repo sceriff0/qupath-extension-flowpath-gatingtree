@@ -93,7 +93,7 @@ public final class GatingEngine {
         if (qf != null) {
             for (int i = 0; i < n; i++) {
                 if (!qf.passes(index.getArea(i), index.getEccentricity(i),
-                        index.getSolidity(i), index.getTotalIntensity(i))) {
+                        index.getSolidity(i), index.getTotalIntensity(i), index.getPerimeter(i))) {
                     excluded[i] = true;
                     phenotypes[i] = null;
                 }
@@ -148,7 +148,8 @@ public final class GatingEngine {
                     index.getArea(i),
                     index.getEccentricity(i),
                     index.getSolidity(i),
-                    index.getTotalIntensity(i));
+                    index.getTotalIntensity(i),
+                    index.getPerimeter(i));
         }
         return mask;
     }

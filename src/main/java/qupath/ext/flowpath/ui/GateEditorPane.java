@@ -55,6 +55,9 @@ public class GateEditorPane extends VBox {
     private MarkerStats markerStats;
     private boolean[] roiMask;
     private boolean suppressEvents = false;
+    // Non-null only when a 2D gate editor (quadrant/polygon/rect/ellipse) is active.
+    // Used by shared clip controls to update axis range. Cleared in setGateNode().
+    private ScatterPlotCanvas currentScatter;
 
     private Consumer<GateNode> onNodeChanged;
     private Runnable onAddToPositive;
@@ -142,6 +145,11 @@ public class GateEditorPane extends VBox {
                 if (clamped != val) { clipLowSpinner.getValueFactory().setValue(clamped); return; }
                 currentNode.setClipPercentileLow(val);
                 updateHistogram();
+                if (currentScatter != null && markerStats != null && currentNode.isExcludeOutliers()) {
+                    String cx = get2DChannelX(currentNode);
+                    String cy = get2DChannelY(currentNode);
+                    if (cx != null && cy != null) applyClipAxisRange(currentScatter, cx, cy, currentNode);
+                }
                 fireNodeChanged();
             }
         });
@@ -151,12 +159,26 @@ public class GateEditorPane extends VBox {
                 if (clamped != val) { clipHighSpinner.getValueFactory().setValue(clamped); return; }
                 currentNode.setClipPercentileHigh(val);
                 updateHistogram();
+                if (currentScatter != null && markerStats != null && currentNode.isExcludeOutliers()) {
+                    String cx = get2DChannelX(currentNode);
+                    String cy = get2DChannelY(currentNode);
+                    if (cx != null && cy != null) applyClipAxisRange(currentScatter, cx, cy, currentNode);
+                }
                 fireNodeChanged();
             }
         });
         excludeOutliersBox.selectedProperty().addListener((obs, old, val) -> {
             if (!suppressEvents && currentNode != null) {
                 currentNode.setExcludeOutliers(val);
+                if (currentScatter != null && markerStats != null) {
+                    if (val) {
+                        String cx = get2DChannelX(currentNode);
+                        String cy = get2DChannelY(currentNode);
+                        if (cx != null && cy != null) applyClipAxisRange(currentScatter, cx, cy, currentNode);
+                    } else {
+                        currentScatter.clearAxisRange();
+                    }
+                }
                 fireNodeChanged();
             }
         });
@@ -225,6 +247,7 @@ public class GateEditorPane extends VBox {
      */
     public void setGateNode(GateNode node) {
         this.currentNode = node;
+        this.currentScatter = null;
         if (node == null) {
             withSuppressedEvents(() -> setDisabled(true));
             gateTypeLabel.setText("No gate selected");
@@ -325,16 +348,30 @@ public class GateEditorPane extends VBox {
         sliderX.setBlockIncrement(0.01);
         Label valX = new Label(String.format("%.3f", gate.getThresholdX()));
         valX.setStyle("-fx-text-fill: white; -fx-font-family: monospace;");
-        sliderX.valueProperty().addListener((obs, old, val) -> {
-            if (!suppressEvents) { gate.setThresholdX(val.doubleValue()); valX.setText(String.format("%.3f", val.doubleValue())); fireNodeChanged(); }
-        });
 
         Slider sliderY = new Slider(-5, 5, gate.getThresholdY());
         sliderY.setBlockIncrement(0.01);
         Label valY = new Label(String.format("%.3f", gate.getThresholdY()));
         valY.setStyle("-fx-text-fill: white; -fx-font-family: monospace;");
+
+        final ScatterPlotCanvas[] scatterRef = {null};
+
+        sliderX.valueProperty().addListener((obs, old, val) -> {
+            if (!suppressEvents) {
+                gate.setThresholdX(val.doubleValue());
+                valX.setText(String.format("%.3f", val.doubleValue()));
+                if (scatterRef[0] != null) scatterRef[0].setCrosshairOverlay(gate.getThresholdX(), gate.getThresholdY());
+                fireNodeChanged();
+            }
+        });
+
         sliderY.valueProperty().addListener((obs, old, val) -> {
-            if (!suppressEvents) { gate.setThresholdY(val.doubleValue()); valY.setText(String.format("%.3f", val.doubleValue())); fireNodeChanged(); }
+            if (!suppressEvents) {
+                gate.setThresholdY(val.doubleValue());
+                valY.setText(String.format("%.3f", val.doubleValue()));
+                if (scatterRef[0] != null) scatterRef[0].setCrosshairOverlay(gate.getThresholdX(), gate.getThresholdY());
+                fireNodeChanged();
+            }
         });
 
         HBox modeRow = new HBox(12, new Label("Mode:") {{ setStyle("-fx-text-fill: white;"); }}, rawModeBtn, zscoreModeBtn);
@@ -356,6 +393,12 @@ public class GateEditorPane extends VBox {
                 double[][] filtered = getFilteredXY(mxIdx, myIdx);
                 ScatterPlotCanvas scatter = new ScatterPlotCanvas();
                 scatter.setData(filtered[0], filtered[1], gate.getChannelX(), gate.getChannelY());
+                scatter.setCrosshairOverlay(gate.getThresholdX(), gate.getThresholdY());
+                if (gate.isExcludeOutliers() && markerStats != null) {
+                    applyClipAxisRange(scatter, gate.getChannelX(), gate.getChannelY(), gate);
+                }
+                scatterRef[0] = scatter;
+                this.currentScatter = scatter;
                 gateSpecificArea.getChildren().addAll(createSectionHeader("Scatter Plot"), scatter);
 
                 // Refresh scatter when channels change
@@ -431,6 +474,10 @@ public class GateEditorPane extends VBox {
                 ScatterPlotCanvas scatter = new ScatterPlotCanvas();
                 double[][] filtered = getFilteredXY(mxIdx, myIdx);
                 scatter.setData(filtered[0], filtered[1], chX, chY);
+                if (node.isExcludeOutliers() && markerStats != null) {
+                    applyClipAxisRange(scatter, chX, chY, node);
+                }
+                this.currentScatter = scatter;
 
                 if (node instanceof PolygonGate pg && pg.getVertices().size() >= 3) {
                     scatter.setPolygonOverlay(pg.getVertices());
@@ -776,5 +823,33 @@ public class GateEditorPane extends VBox {
         header.setStyle("-fx-text-fill: #888888; -fx-font-size: 10; -fx-font-weight: bold;");
         header.setPadding(new Insets(4, 0, 0, 0));
         return header;
+    }
+
+    private void applyClipAxisRange(ScatterPlotCanvas scatter, String chX, String chY, GateNode node) {
+        if (markerStats == null || !node.isExcludeOutliers()) {
+            scatter.clearAxisRange();
+            return;
+        }
+        double loX = markerStats.getPercentileValue(chX, node.getClipPercentileLow());
+        double hiX = markerStats.getPercentileValue(chX, node.getClipPercentileHigh());
+        double loY = markerStats.getPercentileValue(chY, node.getClipPercentileLow());
+        double hiY = markerStats.getPercentileValue(chY, node.getClipPercentileHigh());
+        scatter.setAxisRange(loX, hiX, loY, hiY);
+    }
+
+    private String get2DChannelX(GateNode node) {
+        if (node instanceof PolygonGate pg) return pg.getChannelX();
+        if (node instanceof RectangleGate rg) return rg.getChannelX();
+        if (node instanceof EllipseGate eg) return eg.getChannelX();
+        if (node instanceof QuadrantGate qg) return qg.getChannelX();
+        return null;
+    }
+
+    private String get2DChannelY(GateNode node) {
+        if (node instanceof PolygonGate pg) return pg.getChannelY();
+        if (node instanceof RectangleGate rg) return rg.getChannelY();
+        if (node instanceof EllipseGate eg) return eg.getChannelY();
+        if (node instanceof QuadrantGate qg) return qg.getChannelY();
+        return null;
     }
 }
