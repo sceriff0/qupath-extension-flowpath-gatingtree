@@ -99,6 +99,12 @@ class FlowPathSerializerTest {
         assertEquals(100, lqf.getMinTotalIntensity());
         assertEquals(0.9, lqf.getMaxEccentricity());
         assertEquals(0.5, lqf.getMinSolidity());
+        // New fields defaulted since not set
+        assertEquals(0.0, lqf.getMinEccentricity());
+        assertEquals(1.0, lqf.getMaxSolidity());
+        assertEquals(Double.MAX_VALUE, lqf.getMaxTotalIntensity());
+        assertEquals(0.0, lqf.getMinPerimeter());
+        assertEquals(Double.MAX_VALUE, lqf.getMaxPerimeter());
     }
 
     @Test
@@ -160,6 +166,72 @@ class FlowPathSerializerTest {
         GateTree loaded = FlowPathSerializer.load(file);
 
         assertEquals("550e8400-e29b-41d4-a716-446655440000", loaded.getRoiFilterId());
+    }
+
+    @Test
+    void qualityFilterNewFieldsRoundTrip() throws IOException {
+        var tree = new GateTree();
+        var qf = new QualityFilter();
+        qf.setMinArea(25);
+        qf.setMaxArea(500);
+        qf.setMinEccentricity(0.2);
+        qf.setMaxEccentricity(0.9);
+        qf.setMinSolidity(0.3);
+        qf.setMaxSolidity(0.85);
+        qf.setMinTotalIntensity(100);
+        qf.setMaxTotalIntensity(8000);
+        qf.setMinPerimeter(10);
+        qf.setMaxPerimeter(300);
+        tree.setQualityFilter(qf);
+        tree.addRoot(new GateNode("CD45"));
+
+        File file = tempDir.resolve("qf_new.json").toFile();
+        FlowPathSerializer.save(tree, file);
+        GateTree loaded = FlowPathSerializer.load(file);
+
+        QualityFilter lqf = loaded.getQualityFilter();
+        assertEquals(25, lqf.getMinArea());
+        assertEquals(500, lqf.getMaxArea());
+        assertEquals(0.2, lqf.getMinEccentricity());
+        assertEquals(0.9, lqf.getMaxEccentricity());
+        assertEquals(0.3, lqf.getMinSolidity());
+        assertEquals(0.85, lqf.getMaxSolidity());
+        assertEquals(100, lqf.getMinTotalIntensity());
+        assertEquals(8000, lqf.getMaxTotalIntensity());
+        assertEquals(10, lqf.getMinPerimeter());
+        assertEquals(300, lqf.getMaxPerimeter());
+    }
+
+    @Test
+    void qualityFilterBackwardCompatMissingNewFields() throws IOException {
+        String json = """
+                {
+                  "version": 1,
+                  "qualityFilter": {
+                    "minArea": 50,
+                    "maxArea": 1000,
+                    "minTotalIntensity": 200,
+                    "maxEccentricity": 0.8,
+                    "minSolidity": 0.5
+                  },
+                  "gates": []
+                }
+                """;
+        File file = tempDir.resolve("old_qf.json").toFile();
+        try (var w = new java.io.BufferedWriter(new java.io.FileWriter(file))) { w.write(json); }
+        GateTree loaded = FlowPathSerializer.load(file);
+        QualityFilter lqf = loaded.getQualityFilter();
+        assertEquals(50, lqf.getMinArea());
+        assertEquals(1000, lqf.getMaxArea());
+        assertEquals(200, lqf.getMinTotalIntensity());
+        assertEquals(0.8, lqf.getMaxEccentricity());
+        assertEquals(0.5, lqf.getMinSolidity());
+        // New fields default to "disabled" values
+        assertEquals(0.0, lqf.getMinEccentricity());
+        assertEquals(1.0, lqf.getMaxSolidity());
+        assertEquals(Double.MAX_VALUE, lqf.getMaxTotalIntensity());
+        assertEquals(0.0, lqf.getMinPerimeter());
+        assertEquals(Double.MAX_VALUE, lqf.getMaxPerimeter());
     }
 
     @Test

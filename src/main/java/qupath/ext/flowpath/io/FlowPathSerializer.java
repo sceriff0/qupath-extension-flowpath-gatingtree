@@ -107,9 +107,14 @@ public class FlowPathSerializer {
         JsonObject obj = new JsonObject();
         obj.addProperty("minArea", qf.getMinArea());
         obj.addProperty("maxArea", qf.getMaxArea());
-        obj.addProperty("minTotalIntensity", qf.getMinTotalIntensity());
+        obj.addProperty("minEccentricity", qf.getMinEccentricity());
         obj.addProperty("maxEccentricity", qf.getMaxEccentricity());
         obj.addProperty("minSolidity", qf.getMinSolidity());
+        obj.addProperty("maxSolidity", qf.getMaxSolidity());
+        obj.addProperty("minTotalIntensity", qf.getMinTotalIntensity());
+        obj.addProperty("maxTotalIntensity", qf.getMaxTotalIntensity());
+        obj.addProperty("minPerimeter", qf.getMinPerimeter());
+        obj.addProperty("maxPerimeter", qf.getMaxPerimeter());
         return obj;
     }
 
@@ -119,12 +124,22 @@ public class FlowPathSerializer {
             qf.setMinArea(obj.get("minArea").getAsDouble());
         if (obj.has("maxArea"))
             qf.setMaxArea(obj.get("maxArea").getAsDouble());
-        if (obj.has("minTotalIntensity"))
-            qf.setMinTotalIntensity(obj.get("minTotalIntensity").getAsDouble());
+        if (obj.has("minEccentricity"))
+            qf.setMinEccentricity(obj.get("minEccentricity").getAsDouble());
         if (obj.has("maxEccentricity"))
             qf.setMaxEccentricity(obj.get("maxEccentricity").getAsDouble());
         if (obj.has("minSolidity"))
             qf.setMinSolidity(obj.get("minSolidity").getAsDouble());
+        if (obj.has("maxSolidity"))
+            qf.setMaxSolidity(obj.get("maxSolidity").getAsDouble());
+        if (obj.has("minTotalIntensity"))
+            qf.setMinTotalIntensity(obj.get("minTotalIntensity").getAsDouble());
+        if (obj.has("maxTotalIntensity"))
+            qf.setMaxTotalIntensity(obj.get("maxTotalIntensity").getAsDouble());
+        if (obj.has("minPerimeter"))
+            qf.setMinPerimeter(obj.get("minPerimeter").getAsDouble());
+        if (obj.has("maxPerimeter"))
+            qf.setMaxPerimeter(obj.get("maxPerimeter").getAsDouble());
         // "hideFiltered" silently ignored for backward compat with v1 files
         return qf;
     }
