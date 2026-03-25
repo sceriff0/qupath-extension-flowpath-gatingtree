@@ -33,6 +33,7 @@ import java.util.function.BiConsumer;
 public class FlowPathCell extends TreeCell<Object> {
 
     private static final Color GATE_BAR_COLOR = Color.web("#3a4a5a");
+    private static final Color GATE_BAR_DISABLED_COLOR = Color.web("#2a2a2a");
     private static final Color DROP_HIGHLIGHT_COLOR = Color.web("#ffcc00");
     private static final CornerRadii BAR_RADII = new CornerRadii(6);
     private static final CornerRadii PILL_RADII = new CornerRadii(10);
@@ -167,8 +168,10 @@ public class FlowPathCell extends TreeCell<Object> {
         HBox bar = new HBox(8);
         bar.setAlignment(Pos.CENTER_LEFT);
         bar.setPadding(BAR_PADDING);
-        bar.setBackground(new Background(new BackgroundFill(GATE_BAR_COLOR, BAR_RADII, Insets.EMPTY)));
+        Color barColor = node.isEnabled() ? GATE_BAR_COLOR : GATE_BAR_DISABLED_COLOR;
+        bar.setBackground(new Background(new BackgroundFill(barColor, BAR_RADII, Insets.EMPTY)));
         bar.setMaxWidth(Double.MAX_VALUE);
+        bar.setOpacity(node.isEnabled() ? 1.0 : 0.5);
         HBox.setHgrow(bar, Priority.ALWAYS);
 
         if (node instanceof QuadrantGate qg) {

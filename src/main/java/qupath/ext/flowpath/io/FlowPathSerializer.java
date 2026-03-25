@@ -157,6 +157,9 @@ public class FlowPathSerializer {
     private static JsonObject serializeNode(GateNode node) {
         JsonObject obj = new JsonObject();
         obj.addProperty("type", node.getGateType());
+        if (!node.isEnabled()) {
+            obj.addProperty("enabled", false);
+        }
         obj.addProperty("clipPercentileLow", node.getClipPercentileLow());
         obj.addProperty("clipPercentileHigh", node.getClipPercentileHigh());
         obj.addProperty("excludeOutliers", node.isExcludeOutliers());
@@ -245,6 +248,7 @@ public class FlowPathSerializer {
         String type = obj.has("type") ? obj.get("type").getAsString() : "threshold";
 
         // Shared fields
+        boolean enabled = !obj.has("enabled") || obj.get("enabled").getAsBoolean();
         double clipLow = obj.has("clipPercentileLow") ? obj.get("clipPercentileLow").getAsDouble() : 1.0;
         double clipHigh = obj.has("clipPercentileHigh") ? obj.get("clipPercentileHigh").getAsDouble() : 99.0;
         boolean excludeOutliers = false;
@@ -253,24 +257,22 @@ public class FlowPathSerializer {
         else if (obj.has("hideOutliers"))
             excludeOutliers = obj.get("hideOutliers").getAsBoolean();
 
+        GateNode result;
         if ("quadrant".equals(type)) {
-            return deserializeQuadrantNode(obj, clipLow, clipHigh, excludeOutliers);
+            result = deserializeQuadrantNode(obj, clipLow, clipHigh, excludeOutliers);
+        } else if ("boolean".equals(type)) {
+            result = deserializeBooleanNode(obj, clipLow, clipHigh, excludeOutliers);
+        } else if ("polygon".equals(type)) {
+            result = deserialize2DNode(new PolygonGate(), obj, clipLow, clipHigh, excludeOutliers);
+        } else if ("rectangle".equals(type)) {
+            result = deserialize2DNode(new RectangleGate(), obj, clipLow, clipHigh, excludeOutliers);
+        } else if ("ellipse".equals(type)) {
+            result = deserialize2DNode(new EllipseGate(), obj, clipLow, clipHigh, excludeOutliers);
+        } else {
+            result = deserializeThresholdNode(obj, clipLow, clipHigh, excludeOutliers);
         }
-        if ("boolean".equals(type)) {
-            return deserializeBooleanNode(obj, clipLow, clipHigh, excludeOutliers);
-        }
-        if ("polygon".equals(type)) {
-            return deserialize2DNode(new PolygonGate(), obj, clipLow, clipHigh, excludeOutliers);
-        }
-        if ("rectangle".equals(type)) {
-            return deserialize2DNode(new RectangleGate(), obj, clipLow, clipHigh, excludeOutliers);
-        }
-        if ("ellipse".equals(type)) {
-            return deserialize2DNode(new EllipseGate(), obj, clipLow, clipHigh, excludeOutliers);
-        }
-
-        // Default: threshold gate (backward-compatible)
-        return deserializeThresholdNode(obj, clipLow, clipHigh, excludeOutliers);
+        result.setEnabled(enabled);
+        return result;
     }
 
     private static GateNode deserializeThresholdNode(JsonObject obj,

@@ -33,6 +33,7 @@ public class GateEditorPane extends VBox {
 
     // --- Shared controls ---
     private final Label gateTypeLabel;
+    private final CheckBox enabledCheckBox;
     private final Spinner<Double> clipLowSpinner;
     private final Spinner<Double> clipHighSpinner;
     private final CheckBox excludeOutliersBox;
@@ -67,9 +68,20 @@ public class GateEditorPane extends VBox {
         setPadding(new Insets(10));
         setStyle("-fx-background-color: #2a2a2a;");
 
-        // Gate type indicator
+        // Gate type indicator and enabled toggle
         gateTypeLabel = new Label("No gate selected");
         gateTypeLabel.setStyle("-fx-text-fill: #80b0d0; -fx-font-size: 11; -fx-font-weight: bold;");
+
+        enabledCheckBox = new CheckBox("Enabled");
+        enabledCheckBox.setSelected(true);
+        enabledCheckBox.setStyle("-fx-text-fill: white;");
+        enabledCheckBox.setTooltip(new Tooltip("When disabled, this gate is skipped during classification"));
+        enabledCheckBox.selectedProperty().addListener((obs, old, val) -> {
+            if (!suppressEvents && currentNode != null) {
+                currentNode.setEnabled(val);
+                fireNodeChanged();
+            }
+        });
 
         // --- Threshold-specific controls (always created, shown/hidden as needed) ---
         channelCombo = new ComboBox<>();
@@ -205,8 +217,11 @@ public class GateEditorPane extends VBox {
         });
 
         // Assemble
+        HBox headerRow = new HBox(12, gateTypeLabel, enabledCheckBox);
+        headerRow.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
+
         getChildren().addAll(
-            gateTypeLabel,
+            headerRow,
             gateSpecificArea,
             createSectionHeader("Outlier Clipping"), clipRow,
             new Separator(),
@@ -240,6 +255,7 @@ public class GateEditorPane extends VBox {
             setDisabled(false);
 
             // Shared controls
+            enabledCheckBox.setSelected(node.isEnabled());
             clipLowSpinner.getValueFactory().setValue(node.getClipPercentileLow());
             clipHighSpinner.getValueFactory().setValue(node.getClipPercentileHigh());
             excludeOutliersBox.setSelected(node.isExcludeOutliers());

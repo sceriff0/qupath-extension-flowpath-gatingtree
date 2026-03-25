@@ -200,6 +200,7 @@ public final class GatingEngine {
     private static void walkNode(GateNode node, int cellIdx,
                                  CellIndex index, MarkerStats stats, boolean useZScore,
                                  String[] phenotypes, boolean[] excluded, int[] colors) {
+        if (!node.isEnabled()) return;
         if (node instanceof QuadrantGate qg) {
             walkQuadrantNode(qg, cellIdx, index, stats, useZScore, phenotypes, excluded, colors);
         } else if (node instanceof BooleanGate bg) {

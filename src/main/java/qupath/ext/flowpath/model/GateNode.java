@@ -16,6 +16,7 @@ import java.util.List;
 public class GateNode {
 
     // --- Shared fields (all gate types) ---
+    private boolean enabled = true;
     private double clipPercentileLow = 1.0;
     private double clipPercentileHigh = 99.0;
     private boolean excludeOutliers = false;
@@ -78,6 +79,9 @@ public class GateNode {
     }
 
     // ========== Shared getters/setters ==========
+
+    public boolean isEnabled() { return enabled; }
+    public void setEnabled(boolean enabled) { this.enabled = enabled; }
 
     public double getClipPercentileLow() { return clipPercentileLow; }
     public void setClipPercentileLow(double v) { this.clipPercentileLow = v; }
@@ -151,6 +155,7 @@ public class GateNode {
      * Subclasses should call this in their deepCopy implementations.
      */
     protected void copySharedFieldsTo(GateNode target) {
+        target.enabled = this.enabled;
         target.clipPercentileLow = this.clipPercentileLow;
         target.clipPercentileHigh = this.clipPercentileHigh;
         target.excludeOutliers = this.excludeOutliers;
