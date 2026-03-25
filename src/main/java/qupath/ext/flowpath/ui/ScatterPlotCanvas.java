@@ -34,6 +34,10 @@ public class ScatterPlotCanvas extends Canvas {
     private List<double[]> polygonVertices;
     private double[] rectBounds;  // [minX, maxX, minY, maxY]
     private double[] ellipseParams; // [centerX, centerY, radiusX, radiusY]
+    private double[] crosshairThresholds; // [thresholdX, thresholdY]
+
+    // Axis range overrides (null = use auto-computed from data)
+    private Double overrideMinX, overrideMaxX, overrideMinY, overrideMaxY;
 
     private Color insideColor = Color.rgb(0, 200, 0, 0.6);
     private Color outsideColor = Color.rgb(128, 128, 128, 0.3);
@@ -117,6 +121,7 @@ public class ScatterPlotCanvas extends Canvas {
         this.polygonVertices = vertices;
         this.rectBounds = null;
         this.ellipseParams = null;
+        this.crosshairThresholds = null;
         repaint();
     }
 
@@ -124,6 +129,7 @@ public class ScatterPlotCanvas extends Canvas {
         this.rectBounds = new double[]{minX, maxX, minY, maxY};
         this.polygonVertices = null;
         this.ellipseParams = null;
+        this.crosshairThresholds = null;
         repaint();
     }
 
@@ -131,6 +137,15 @@ public class ScatterPlotCanvas extends Canvas {
         this.ellipseParams = new double[]{cx, cy, rx, ry};
         this.polygonVertices = null;
         this.rectBounds = null;
+        this.crosshairThresholds = null;
+        repaint();
+    }
+
+    public void setCrosshairOverlay(double thresholdX, double thresholdY) {
+        this.crosshairThresholds = new double[]{thresholdX, thresholdY};
+        this.polygonVertices = null;
+        this.rectBounds = null;
+        this.ellipseParams = null;
         repaint();
     }
 
@@ -138,11 +153,47 @@ public class ScatterPlotCanvas extends Canvas {
         this.polygonVertices = null;
         this.rectBounds = null;
         this.ellipseParams = null;
+        this.crosshairThresholds = null;
+        repaint();
+    }
+
+    public void setAxisRange(Double minX, Double maxX, Double minY, Double maxY) {
+        this.overrideMinX = minX;
+        this.overrideMaxX = maxX;
+        this.overrideMinY = minY;
+        this.overrideMaxY = maxY;
+        repaint();
+    }
+
+    public void clearAxisRange() {
+        this.overrideMinX = null;
+        this.overrideMaxX = null;
+        this.overrideMinY = null;
+        this.overrideMaxY = null;
         repaint();
     }
 
     public void setInsideColor(Color c) { this.insideColor = c; repaint(); }
     public void setOutsideColor(Color c) { this.outsideColor = c; repaint(); }
+
+    // ---- Effective axis bounds (override if set, otherwise auto-computed) ----
+
+    private double effectiveMinX() {
+        if (overrideMinX != null && overrideMaxX != null) return overrideMinX - (overrideMaxX - overrideMinX) * 0.05;
+        return minX;
+    }
+    private double effectiveMaxX() {
+        if (overrideMinX != null && overrideMaxX != null) return overrideMaxX + (overrideMaxX - overrideMinX) * 0.05;
+        return maxX;
+    }
+    private double effectiveMinY() {
+        if (overrideMinY != null && overrideMaxY != null) return overrideMinY - (overrideMaxY - overrideMinY) * 0.05;
+        return minY;
+    }
+    private double effectiveMaxY() {
+        if (overrideMinY != null && overrideMaxY != null) return overrideMaxY + (overrideMaxY - overrideMinY) * 0.05;
+        return maxY;
+    }
 
     // ---- Coordinate conversion helpers ----
 
@@ -158,22 +209,22 @@ public class ScatterPlotCanvas extends Canvas {
 
     public double dataXToScreenX(double dataX) {
         double plotW = getWidth() - PADDING_LEFT - PADDING_RIGHT;
-        return PADDING_LEFT + valueToPixel(dataX, minX, maxX, plotW);
+        return PADDING_LEFT + valueToPixel(dataX, effectiveMinX(), effectiveMaxX(), plotW);
     }
 
     public double dataYToScreenY(double dataY) {
         double plotH = getHeight() - PADDING_TOP - PADDING_BOTTOM;
-        return PADDING_TOP + plotH - valueToPixel(dataY, minY, maxY, plotH);
+        return PADDING_TOP + plotH - valueToPixel(dataY, effectiveMinY(), effectiveMaxY(), plotH);
     }
 
     public double screenXToDataX(double screenX) {
         double plotW = getWidth() - PADDING_LEFT - PADDING_RIGHT;
-        return pixelToValue(screenX - PADDING_LEFT, minX, maxX, plotW);
+        return pixelToValue(screenX - PADDING_LEFT, effectiveMinX(), effectiveMaxX(), plotW);
     }
 
     public double screenYToDataY(double screenY) {
         double plotH = getHeight() - PADDING_TOP - PADDING_BOTTOM;
-        return pixelToValue(PADDING_TOP + plotH - screenY, minY, maxY, plotH);
+        return pixelToValue(PADDING_TOP + plotH - screenY, effectiveMinY(), effectiveMaxY(), plotH);
     }
 
     // ---- Drawing mode API ----
@@ -346,8 +397,8 @@ public class ScatterPlotCanvas extends Canvas {
         double cy = dataYToScreenY(ellipseParams[1]);
         double plotW = getWidth() - PADDING_LEFT - PADDING_RIGHT;
         double plotH = getHeight() - PADDING_TOP - PADDING_BOTTOM;
-        double erx = valueToPixel(ellipseParams[2], 0, maxX - minX, plotW);
-        double ery = valueToPixel(ellipseParams[3], 0, maxY - minY, plotH);
+        double erx = valueToPixel(ellipseParams[2], 0, effectiveMaxX() - effectiveMinX(), plotW);
+        double ery = valueToPixel(ellipseParams[3], 0, effectiveMaxY() - effectiveMinY(), plotH);
         // top, right, bottom, left
         return new double[][]{{cx, cy - ery}, {cx + erx, cy}, {cx, cy + ery}, {cx - erx, cy}};
     }
@@ -411,10 +462,12 @@ public class ScatterPlotCanvas extends Canvas {
 
         // Draw dots
         int step = Math.max(1, xValues.length / MAX_DISPLAY_POINTS);
+        double eMinX = effectiveMinX(), eMaxX = effectiveMaxX();
+        double eMinY = effectiveMinY(), eMaxY = effectiveMaxY();
         for (int i = 0; i < xValues.length; i += step) {
             if (Double.isNaN(xValues[i]) || Double.isNaN(yValues[i])) continue;
-            double px = PADDING_LEFT + valueToPixel(xValues[i], minX, maxX, plotW);
-            double py = PADDING_TOP + plotH - valueToPixel(yValues[i], minY, maxY, plotH);
+            double px = PADDING_LEFT + valueToPixel(xValues[i], eMinX, eMaxX, plotW);
+            double py = PADDING_TOP + plotH - valueToPixel(yValues[i], eMinY, eMaxY, plotH);
 
             boolean inside = isInsideOverlay(xValues[i], yValues[i]);
             gc.setFill(inside ? insideColor : outsideColor);
@@ -435,8 +488,8 @@ public class ScatterPlotCanvas extends Canvas {
         // Axis labels
         gc.setFill(Color.gray(0.7));
         gc.setFont(Font.font(9));
-        gc.fillText(String.format("%.2f", minX), PADDING_LEFT, h - 3);
-        gc.fillText(String.format("%.2f", maxX), PADDING_LEFT + plotW - 30, h - 3);
+        gc.fillText(String.format("%.2f", effectiveMinX()), PADDING_LEFT, h - 3);
+        gc.fillText(String.format("%.2f", effectiveMaxX()), PADDING_LEFT + plotW - 30, h - 3);
         gc.fillText(labelX, PADDING_LEFT + plotW / 2 - 10, h - 3);
 
         gc.save();
@@ -457,6 +510,9 @@ public class ScatterPlotCanvas extends Canvas {
             double dx = (x - ellipseParams[0]) / ellipseParams[2];
             double dy = (y - ellipseParams[1]) / ellipseParams[3];
             return dx * dx + dy * dy <= 1.0;
+        }
+        if (crosshairThresholds != null) {
+            return x >= crosshairThresholds[0] && y >= crosshairThresholds[1];
         }
         return true; // No overlay = all inside
     }
@@ -481,8 +537,8 @@ public class ScatterPlotCanvas extends Canvas {
         if (rectBounds != null) {
             double rx = dataXToScreenX(rectBounds[0]);
             double ry = dataYToScreenY(rectBounds[3]);
-            double rw = valueToPixel(rectBounds[1], minX, maxX, plotW) - valueToPixel(rectBounds[0], minX, maxX, plotW);
-            double rh = valueToPixel(rectBounds[3], minY, maxY, plotH) - valueToPixel(rectBounds[2], minY, maxY, plotH);
+            double rw = valueToPixel(rectBounds[1], effectiveMinX(), effectiveMaxX(), plotW) - valueToPixel(rectBounds[0], effectiveMinX(), effectiveMaxX(), plotW);
+            double rh = valueToPixel(rectBounds[3], effectiveMinY(), effectiveMaxY(), plotH) - valueToPixel(rectBounds[2], effectiveMinY(), effectiveMaxY(), plotH);
             gc.strokeRect(rx, ry, rw, rh);
 
             // Draw handles at corners
@@ -493,13 +549,20 @@ public class ScatterPlotCanvas extends Canvas {
         if (ellipseParams != null) {
             double cx = dataXToScreenX(ellipseParams[0]);
             double cy = dataYToScreenY(ellipseParams[1]);
-            double erx = valueToPixel(ellipseParams[2], 0, maxX - minX, plotW);
-            double ery = valueToPixel(ellipseParams[3], 0, maxY - minY, plotH);
+            double erx = valueToPixel(ellipseParams[2], 0, effectiveMaxX() - effectiveMinX(), plotW);
+            double ery = valueToPixel(ellipseParams[3], 0, effectiveMaxY() - effectiveMinY(), plotH);
             gc.strokeOval(cx - erx, cy - ery, erx * 2, ery * 2);
 
             // Draw handles at cardinal points
             double[][] cardinals = getEllipseHandleScreenPositions();
             drawHandles(gc, arrayCol(cardinals, 0), arrayCol(cardinals, 1));
+        }
+
+        if (crosshairThresholds != null) {
+            double vx = dataXToScreenX(crosshairThresholds[0]);
+            double hy = dataYToScreenY(crosshairThresholds[1]);
+            gc.strokeLine(vx, PADDING_TOP, vx, PADDING_TOP + plotH);
+            gc.strokeLine(PADDING_LEFT, hy, PADDING_LEFT + plotW, hy);
         }
     }
 
