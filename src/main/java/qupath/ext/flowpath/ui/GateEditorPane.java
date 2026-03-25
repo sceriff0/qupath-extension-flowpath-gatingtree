@@ -406,15 +406,50 @@ public class GateEditorPane extends VBox {
             }
         });
 
-        Label info = new Label("Boolean gates combine other gates.\nAdd operand gates as children of the 'Match' branch.");
+        // Clear explanation of how Boolean gates work
+        String opName = gate.getOperation().name();
+        String explanation = switch (opName) {
+            case "AND" -> "A cell must pass ALL operand gates to be classified as 'Match'.\n\n"
+                + "Example: AND(CD45, CD3) = cells that are both CD45+ and CD3+.";
+            case "OR" -> "A cell must pass AT LEAST ONE operand gate to be 'Match'.\n\n"
+                + "Example: OR(CD4, CD8) = cells that are CD4+ or CD8+ (or both).";
+            case "NOT" -> "A cell must FAIL the first operand gate to be 'Match'.\n\n"
+                + "Example: NOT(CD45) = cells that are CD45-negative.";
+            default -> "";
+        };
+        Label info = new Label(explanation);
         info.setStyle("-fx-text-fill: #aaaaaa; -fx-font-size: 10;");
         info.setWrapText(true);
 
-        Label operandCount = new Label("Operands: " + gate.getOperands().size());
-        operandCount.setStyle("-fx-text-fill: white;");
+        // Show current operands
+        List<GateNode> operands = gate.getOperands();
+        Label operandHeader = new Label("Operands (" + operands.size() + "):");
+        operandHeader.setStyle("-fx-text-fill: white; -fx-font-weight: bold;");
+
+        VBox operandList = new VBox(2);
+        if (operands.isEmpty()) {
+            Label none = new Label("No operands yet. Add child gates under this\nBoolean gate's branches — they become operands.");
+            none.setStyle("-fx-text-fill: #888888; -fx-font-size: 10;");
+            none.setWrapText(true);
+            operandList.getChildren().add(none);
+        } else {
+            for (GateNode op : operands) {
+                String desc = op.getChannel() != null ? op.getChannel() : op.getGateType();
+                Label opItem = new Label("  - " + desc);
+                opItem.setStyle("-fx-text-fill: #b0c0d0;");
+                operandList.getChildren().add(opItem);
+            }
+        }
+
+        Label howTo = new Label("How to use: add Threshold or other gates as children\n"
+            + "of this Boolean gate's 'Match' or 'No Match' branches.\n"
+            + "The operands list above shows gates being combined.");
+        howTo.setStyle("-fx-text-fill: #666666; -fx-font-size: 9;");
+        howTo.setWrapText(true);
 
         gateSpecificArea.getChildren().addAll(
-            new HBox(8, opLabel, opCombo), info, operandCount
+            new HBox(8, opLabel, opCombo),
+            info, new Separator(), operandHeader, operandList, new Separator(), howTo
         );
     }
 
