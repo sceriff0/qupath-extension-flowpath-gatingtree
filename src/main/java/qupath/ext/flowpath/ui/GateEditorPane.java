@@ -1,5 +1,6 @@
 package qupath.ext.flowpath.ui;
 
+import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.scene.Node;
 import javafx.scene.control.*;
@@ -506,12 +507,11 @@ public class GateEditorPane extends VBox {
                         replaced = true;
                     }
                     ((PolygonGate) target).setVertices(new ArrayList<>(vertices));
-                    scatter.setPolygonOverlay(((PolygonGate) target).getVertices());
-                    if (replaced) {
-                        applyBranchColorsToScatter(scatter, currentNode);
-                        buildBranchNamesEditor(currentNode);
-                    }
                     fireNodeChanged();
+                    if (replaced) {
+                        // Deferred rebuild so all closures (clear, channels, tools) re-wire for the new gate type
+                        Platform.runLater(() -> setGateNode(currentNode));
+                    }
                 });
                 scatter.setOnRectangleDrawn(bounds -> {
                     GateNode target = currentNode;
@@ -530,12 +530,10 @@ public class GateEditorPane extends VBox {
                         rg.setMinX(bounds[0]); rg.setMaxX(bounds[1]);
                         rg.setMinY(bounds[2]); rg.setMaxY(bounds[3]);
                     }
-                    scatter.setRectangleOverlay(bounds[0], bounds[1], bounds[2], bounds[3]);
-                    if (replaced) {
-                        applyBranchColorsToScatter(scatter, currentNode);
-                        buildBranchNamesEditor(currentNode);
-                    }
                     fireNodeChanged();
+                    if (replaced) {
+                        Platform.runLater(() -> setGateNode(currentNode));
+                    }
                 });
                 scatter.setOnEllipseDrawn(params -> {
                     GateNode target = currentNode;
@@ -554,12 +552,10 @@ public class GateEditorPane extends VBox {
                         eg.setCenterX(params[0]); eg.setCenterY(params[1]);
                         eg.setRadiusX(params[2]); eg.setRadiusY(params[3]);
                     }
-                    scatter.setEllipseOverlay(params[0], params[1], params[2], params[3]);
-                    if (replaced) {
-                        applyBranchColorsToScatter(scatter, currentNode);
-                        buildBranchNamesEditor(currentNode);
-                    }
                     fireNodeChanged();
+                    if (replaced) {
+                        Platform.runLater(() -> setGateNode(currentNode));
+                    }
                 });
 
                 if (node instanceof PolygonGate) scatter.setDrawingMode(ScatterPlotCanvas.DrawingMode.POLYGON);
