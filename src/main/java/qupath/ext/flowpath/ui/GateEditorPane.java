@@ -597,6 +597,7 @@ public class GateEditorPane extends VBox {
 
     private void buildBranchNamesEditor(GateNode node) {
         branchNamesArea.getChildren().clear();
+        if (node == null) return;
         branchNamesArea.getChildren().add(createSectionHeader("Branch Names & Colors"));
 
         GridPane grid = new GridPane();
