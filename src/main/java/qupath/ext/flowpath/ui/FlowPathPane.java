@@ -45,18 +45,11 @@ import java.util.stream.Collectors;
  */
 public class FlowPathPane extends BorderPane {
 
-    /** Wrapper for ROI filter combo box items — stores UUID for matching, displays name. */
-    private record AnnotationItem(String id, String displayName) {
-        @Override public String toString() { return displayName; }
-    }
-
-    private static final AnnotationItem ALL_CELLS = new AnnotationItem(null, "All cells");
-
     private final QuPathGUI qupath;
     private final TreeView<Object> treeView;
     private final GateEditorPane editorPane;
     private final QualityFilterPane qualityFilterPane;
-    private final ComboBox<AnnotationItem> roiComboBox;
+    private final CheckBox roiFilterCheckBox;
     private final LivePreviewService previewService;
     private final Label statusBar;
 
@@ -72,7 +65,7 @@ public class FlowPathPane extends BorderPane {
     private boolean[] cachedQualityMask;
     private boolean[] cachedRoiMask;
     private PathObjectHierarchyListener hierarchyListener;
-    private boolean suppressRoiComboEvents = false;
+    private boolean suppressRoiFilterEvents = false;
     private ImageData<?> listenerImageData;
 
     public FlowPathPane(QuPathGUI qupath) {
@@ -109,28 +102,9 @@ public class FlowPathPane extends BorderPane {
         addRootBtn.setTooltip(new Tooltip("Add a new top-level gate to the gating hierarchy"));
 
         // ROI filter
-        roiComboBox = new ComboBox<>();
-        roiComboBox.getItems().add(ALL_CELLS);
-        roiComboBox.getSelectionModel().select(0);
-        roiComboBox.setMaxWidth(Double.MAX_VALUE);
-        roiComboBox.setOnAction(e -> { if (!suppressRoiComboEvents) onRoiSelectionChanged(); });
-        roiComboBox.setStyle("-fx-text-fill: black;");
-        roiComboBox.setCellFactory(lv -> new ListCell<>() {
-            @Override protected void updateItem(AnnotationItem item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : item.displayName());
-                setStyle("-fx-text-fill: black;");
-            }
-        });
-        roiComboBox.setButtonCell(new ListCell<>() {
-            @Override protected void updateItem(AnnotationItem item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : item.displayName());
-                setStyle("-fx-text-fill: black;");
-            }
-        });
-        Label roiLabel = new Label("ROI Filter:");
-        roiLabel.setStyle("-fx-text-fill: black; -fx-font-size: 10;");
+        roiFilterCheckBox = new CheckBox("Filter by annotations");
+        roiFilterCheckBox.setStyle("-fx-text-fill: black; -fx-font-size: 10;");
+        roiFilterCheckBox.setOnAction(e -> { if (!suppressRoiFilterEvents) onRoiFilterToggled(); });
 
         qualityFilterPane = new QualityFilterPane(gateTree.getQualityFilter());
         qualityFilterPane.setOnFilterChanged(filter -> onQualityFilterChanged());
@@ -138,7 +112,7 @@ public class FlowPathPane extends BorderPane {
         HBox treeToolbar = new HBox(4, addRootBtn);
         HBox.setHgrow(addRootBtn, Priority.ALWAYS);
 
-        VBox leftPane = new VBox(4, treeView, treeToolbar, roiLabel, roiComboBox, qualityFilterPane);
+        VBox leftPane = new VBox(4, treeView, treeToolbar, roiFilterCheckBox, qualityFilterPane);
         VBox.setVgrow(treeView, Priority.ALWAYS);
         leftPane.setPadding(new Insets(4));
         leftPane.setPrefWidth(280);
@@ -252,8 +226,7 @@ public class FlowPathPane extends BorderPane {
 
         cellIndex = CellIndex.build(detections, markerNames);
 
-        // Refresh annotation list and compute ROI mask
-        refreshAnnotationList();
+        // Compute ROI mask (if filter is enabled)
         recomputeRoiMask();
 
         // Compute quality mask and stats (using combined mask)
@@ -295,10 +268,14 @@ public class FlowPathPane extends BorderPane {
             recomputeQualityMask();
         });
 
-        // Listen for annotation changes (add/remove) to refresh ROI list
+        // Listen for annotation changes (add/remove) to recompute ROI mask
         hierarchyListener = event -> {
-            if (!event.isChanging()) {
-                Platform.runLater(this::refreshAnnotationList);
+            if (!event.isChanging() && gateTree.isRoiFilterEnabled()) {
+                Platform.runLater(() -> {
+                    recomputeRoiMask();
+                    editorPane.setRoiMask(cachedRoiMask);
+                    previewService.recomputeStats();
+                });
             }
         };
         listenerImageData = imageData;
@@ -573,47 +550,13 @@ public class FlowPathPane extends BorderPane {
 
     // --- ROI filtering ---
 
-    private void refreshAnnotationList() {
-        suppressRoiComboEvents = true;
-        try {
-        ImageData<?> imageData = qupath.getImageData();
-        AnnotationItem currentSelection = roiComboBox.getValue();
-        String currentId = (currentSelection != null) ? currentSelection.id() : null;
-        roiComboBox.getItems().clear();
-        roiComboBox.getItems().add(ALL_CELLS);
-
-        if (imageData != null) {
-            for (PathObject ann : imageData.getHierarchy().getAnnotationObjects()) {
-                String name = ann.getDisplayedName();
-                if (name != null && !name.isEmpty()) {
-                    roiComboBox.getItems().add(new AnnotationItem(ann.getID().toString(), name));
-                }
-            }
-        }
-
-        // Restore previous selection by UUID if still available
-        if (currentId != null) {
-            for (AnnotationItem item : roiComboBox.getItems()) {
-                if (currentId.equals(item.id())) {
-                    roiComboBox.setValue(item);
-                    return;
-                }
-            }
-        }
-        roiComboBox.getSelectionModel().select(0);
-        } finally {
-            suppressRoiComboEvents = false;
-        }
-    }
-
     private void recomputeRoiMask() {
         if (cellIndex == null) {
             cachedRoiMask = null;
             return;
         }
 
-        String roiId = gateTree.getRoiFilterId();
-        if (roiId == null || roiId.isEmpty()) {
+        if (!gateTree.isRoiFilterEnabled()) {
             cachedRoiMask = null;
             previewService.setRoiMask(null);
             return;
@@ -626,14 +569,12 @@ public class FlowPathPane extends BorderPane {
             return;
         }
 
-        ROI roi = null;
+        List<ROI> rois = new ArrayList<>();
         for (PathObject ann : imageData.getHierarchy().getAnnotationObjects()) {
-            if (roiId.equals(ann.getID().toString())) {
-                roi = ann.getROI();
-                break;
-            }
+            ROI roi = ann.getROI();
+            if (roi != null) rois.add(roi);
         }
-        cachedRoiMask = GatingEngine.computeRoiMask(cellIndex, roi);
+        cachedRoiMask = GatingEngine.computeRoiMask(cellIndex, rois);
         previewService.setRoiMask(cachedRoiMask);
     }
 
@@ -643,12 +584,10 @@ public class FlowPathPane extends BorderPane {
         return GatingEngine.combineMasks(cachedQualityMask, cachedRoiMask);
     }
 
-    private void onRoiSelectionChanged() {
-        AnnotationItem selected = roiComboBox.getValue();
-        gateTree.setRoiFilterId(selected != null ? selected.id() : null);
+    private void onRoiFilterToggled() {
+        gateTree.setRoiFilterEnabled(roiFilterCheckBox.isSelected());
         recomputeRoiMask();
         editorPane.setRoiMask(cachedRoiMask);
-        // Recompute stats with new combined mask, then trigger preview
         previewService.recomputeStats();
     }
 
@@ -700,9 +639,8 @@ public class FlowPathPane extends BorderPane {
         int total = cellIndex != null ? cellIndex.size() : 0;
         int excluded = previewService.getLastExcludedCount();
         int gateCount = countGates(gateTree.getRoots());
-        AnnotationItem roiItem = roiComboBox.getValue();
-        String roiInfo = (roiItem != null && roiItem.id() != null)
-            ? " | ROI: " + roiItem.displayName()
+        String roiInfo = gateTree.isRoiFilterEnabled()
+            ? " | ROI: annotations"
             : "";
         statusBar.setText(String.format("Total: %,d cells | Excluded: %,d | Gates: %d%s",
             total, excluded, gateCount, roiInfo));
@@ -741,22 +679,10 @@ public class FlowPathPane extends BorderPane {
             // Sync the quality filter pane to the new filter object
             qualityFilterPane.setFilter(gateTree.getQualityFilter());
 
-            // Restore ROI selection by UUID
-            String roiId = gateTree.getRoiFilterId();
-            boolean restored = false;
-            if (roiId != null) {
-                for (AnnotationItem item : roiComboBox.getItems()) {
-                    if (roiId.equals(item.id())) {
-                        roiComboBox.setValue(item);
-                        restored = true;
-                        break;
-                    }
-                }
-            }
-            if (!restored) {
-                roiComboBox.getSelectionModel().select(0);
-                gateTree.setRoiFilterId(null);
-            }
+            // Restore ROI filter checkbox state
+            suppressRoiFilterEvents = true;
+            roiFilterCheckBox.setSelected(gateTree.isRoiFilterEnabled());
+            suppressRoiFilterEvents = false;
             recomputeRoiMask();
 
             rebuildTreeView();

@@ -47,9 +47,7 @@ public class FlowPathSerializer {
         JsonObject root = new JsonObject();
         root.addProperty("version", CURRENT_VERSION);
         root.add("qualityFilter", serializeQualityFilter(tree.getQualityFilter()));
-        if (tree.getRoiFilterId() != null) {
-            root.addProperty("roiFilterId", tree.getRoiFilterId());
-        }
+        root.addProperty("roiFilterEnabled", tree.isRoiFilterEnabled());
         root.add("gates", serializeNodeList(tree.getRoots()));
 
         Gson gson = new GsonBuilder().setPrettyPrinting().create();
@@ -84,12 +82,8 @@ public class FlowPathSerializer {
             tree.setQualityFilter(deserializeQualityFilter(root.getAsJsonObject("qualityFilter")));
         }
 
-        if (root.has("roiFilterId")) {
-            tree.setRoiFilterId(root.get("roiFilterId").getAsString());
-        } else if (root.has("roiFilterName")) {
-            // Backward compat: old files stored display name, not UUID
-            // This won't match by UUID but won't crash either
-            tree.setRoiFilterId(root.get("roiFilterName").getAsString());
+        if (root.has("roiFilterEnabled")) {
+            tree.setRoiFilterEnabled(root.get("roiFilterEnabled").getAsBoolean());
         }
 
         if (root.has("gates")) {

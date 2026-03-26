@@ -14,6 +14,7 @@ import qupath.lib.objects.PathObject;
 import qupath.lib.roi.interfaces.ROI;
 
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -169,6 +170,30 @@ public final class GatingEngine {
             PathObject obj = index.getObject(i);
             ROI cellRoi = (obj != null) ? obj.getROI() : null;
             mask[i] = (cellRoi != null) && roi.contains(cellRoi.getCentroidX(), cellRoi.getCentroidY());
+        }
+        return mask;
+    }
+
+    /**
+     * Compute a boolean mask indicating which cells fall inside any of the given ROIs.
+     * If the collection is empty, all cells are excluded.
+     */
+    public static boolean[] computeRoiMask(CellIndex index, Collection<ROI> rois) {
+        int n = index.size();
+        boolean[] mask = new boolean[n];
+        if (rois.isEmpty()) return mask;
+        for (int i = 0; i < n; i++) {
+            PathObject obj = index.getObject(i);
+            ROI cellRoi = (obj != null) ? obj.getROI() : null;
+            if (cellRoi == null) continue;
+            double cx = cellRoi.getCentroidX();
+            double cy = cellRoi.getCentroidY();
+            for (ROI roi : rois) {
+                if (roi.contains(cx, cy)) {
+                    mask[i] = true;
+                    break;
+                }
+            }
         }
         return mask;
     }

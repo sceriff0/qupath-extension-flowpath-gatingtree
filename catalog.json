@@ -1,58 +1,16 @@
 {
   "name": "FlowPath Extension Catalog",
-  "description": "Interactive tree-based cell phenotyping for QuPath",
+  "description": "Extending QuPath with classical Flow Cytometry analysis",
   "extensions": [
     {
-      "name": "FlowPath",
-      "description": "Interactive tree-based cell phenotyping with hierarchical gates, live histogram visualization, quality filters, and CSV export. Designed for multiplexed imaging data.",
+      "name": "FlowPath - GatingTree",
+      "description": "Interactive tree-based cell phenotyping with hierarchical gates. Designed for multiplexed imaging data.",
       "author": "Valer",
       "homepage": "https://github.com/sceriff0/qupath-extension-flowpath",
       "releases": [
         {
           "name": "v1.0.0",
           "main_url": "https://github.com/sceriff0/qupath-extension-flowpath/releases/download/v1.0.0/FlowPath-1.0.0.jar",
-          "version_range": {
-            "min": "v0.7.0"
-          }
-        },
-        {
-          "name": "v0.5.0",
-          "main_url": "https://github.com/sceriff0/qupath-extension-flowpath/releases/download/v0.5.0/FlowPath-0.5.0.jar",
-          "version_range": {
-            "min": "v0.7.0"
-          }
-        },
-        {
-          "name": "v0.4.1",
-          "main_url": "https://github.com/sceriff0/qupath-extension-flowpath/releases/download/v0.4.1/FlowPath-0.4.1.jar",
-          "version_range": {
-            "min": "v0.7.0"
-          }
-        },
-        {
-          "name": "v0.4.0",
-          "main_url": "https://github.com/sceriff0/qupath-extension-gatetree/releases/download/v0.4.0/Gate.Tree-0.4.0.jar",
-          "version_range": {
-            "min": "v0.7.0"
-          }
-        },
-        {
-          "name": "v0.3.4",
-          "main_url": "https://github.com/sceriff0/qupath-extension-gatetree/releases/download/v0.3.4/qupath-extension-gatetree-0.3.4.jar",
-          "version_range": {
-            "min": "v0.7.0"
-          }
-        },
-        {
-          "name": "v0.2.0",
-          "main_url": "https://github.com/sceriff0/qupath-extension-gatetree/releases/download/v0.2.0/qupath-extension-gatetree-0.2.0.jar",
-          "version_range": {
-            "min": "v0.7.0"
-          }
-        },
-        {
-          "name": "v0.1.0",
-          "main_url": "https://github.com/sceriff0/qupath-extension-gatetree/releases/download/v0.1.0/qupath-extension-gatetree-0.1.0.jar",
           "version_range": {
             "min": "v0.7.0"
           }

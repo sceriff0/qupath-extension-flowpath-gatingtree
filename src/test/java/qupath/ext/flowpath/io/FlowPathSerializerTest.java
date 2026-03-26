@@ -156,16 +156,16 @@ class FlowPathSerializerTest {
     }
 
     @Test
-    void roiFilterIdRoundTrip() throws IOException {
+    void roiFilterEnabledRoundTrip() throws IOException {
         var tree = new GateTree();
         tree.addRoot(new GateNode("CD45"));
-        tree.setRoiFilterId("550e8400-e29b-41d4-a716-446655440000");
+        tree.setRoiFilterEnabled(true);
 
         File file = tempDir.resolve("roi.json").toFile();
         FlowPathSerializer.save(tree, file);
         GateTree loaded = FlowPathSerializer.load(file);
 
-        assertEquals("550e8400-e29b-41d4-a716-446655440000", loaded.getRoiFilterId());
+        assertTrue(loaded.isRoiFilterEnabled());
     }
 
     @Test
@@ -235,7 +235,7 @@ class FlowPathSerializerTest {
     }
 
     @Test
-    void legacyRoiFilterNameLoadsAsRoiFilterId() throws IOException {
+    void legacyRoiFilterNameIsIgnored() throws IOException {
         String json = """
                 {
                   "version": 1,
@@ -262,6 +262,6 @@ class FlowPathSerializerTest {
         }
 
         GateTree loaded = FlowPathSerializer.load(file);
-        assertEquals("Annotation 1", loaded.getRoiFilterId());
+        assertFalse(loaded.isRoiFilterEnabled());
     }
 }
