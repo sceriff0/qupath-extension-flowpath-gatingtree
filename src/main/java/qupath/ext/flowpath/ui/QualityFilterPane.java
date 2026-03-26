@@ -211,14 +211,13 @@ public class QualityFilterPane extends TitledPane {
         syncMaxFilterValue(perimMaxSlider, v -> this.filter.setMaxPerimeter(v));
 
         suppressEvents = false;
-        updateActiveIndicator();
     }
 
     private void syncMaxFilterValue(Slider slider, java.util.function.DoubleConsumer setter) {
         double v = slider.getValue();
         double range = slider.getMax() - slider.getMin();
-        if (v >= slider.getMax() - range * 0.001) {
-            setter.accept(slider.getMax() <= 1.0 ? slider.getMax() : Double.MAX_VALUE);
+        if (range <= 0 || v >= slider.getMax() - range * 0.001) {
+            setter.accept(Double.MAX_VALUE);
         } else {
             setter.accept(v);
         }
