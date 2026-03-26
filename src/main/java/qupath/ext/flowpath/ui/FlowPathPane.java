@@ -135,14 +135,7 @@ public class FlowPathPane extends BorderPane {
         qualityFilterPane = new QualityFilterPane(gateTree.getQualityFilter());
         qualityFilterPane.setOnFilterChanged(filter -> onQualityFilterChanged());
 
-        // Expand/Collapse buttons
-        Button expandAllBtn = new Button("\u25BC");
-        expandAllBtn.setTooltip(new Tooltip("Expand all gates"));
-        expandAllBtn.setOnAction(e -> expandAll(treeView.getRoot()));
-        Button collapseAllBtn = new Button("\u25B6");
-        collapseAllBtn.setTooltip(new Tooltip("Collapse all gates"));
-        collapseAllBtn.setOnAction(e -> collapseAll(treeView.getRoot()));
-        HBox treeToolbar = new HBox(4, addRootBtn, expandAllBtn, collapseAllBtn);
+        HBox treeToolbar = new HBox(4, addRootBtn);
         HBox.setHgrow(addRootBtn, Priority.ALWAYS);
 
         VBox leftPane = new VBox(4, treeView, treeToolbar, roiLabel, roiComboBox, qualityFilterPane);
@@ -377,6 +370,13 @@ public class FlowPathPane extends BorderPane {
         expandAll(root);
     }
 
+    private void expandAll(TreeItem<?> item) {
+        item.setExpanded(true);
+        for (TreeItem<?> child : item.getChildren()) {
+            expandAll(child);
+        }
+    }
+
     private TreeItem<Object> buildTreeItem(GateNode gate) {
         TreeItem<Object> gateItem = new TreeItem<>(gate);
         gateItem.setExpanded(true);
@@ -392,13 +392,6 @@ public class FlowPathPane extends BorderPane {
         }
 
         return gateItem;
-    }
-
-    private void expandAll(TreeItem<?> item) {
-        item.setExpanded(true);
-        for (TreeItem<?> child : item.getChildren()) {
-            expandAll(child);
-        }
     }
 
     // --- Gate operations ---
@@ -769,6 +762,7 @@ public class FlowPathPane extends BorderPane {
 
             rebuildTreeView();
             onQualityFilterChanged();
+            requestPreviewUpdate();
             Dialogs.showInfoNotification("FlowPath", "Loaded from " + file.getName());
         } catch (Exception ex) {
             Dialogs.showErrorMessage("Load Error", ex.getMessage());
@@ -858,14 +852,6 @@ public class FlowPathPane extends BorderPane {
             }
         }
         return false;
-    }
-
-    private void collapseAll(TreeItem<?> item) {
-        if (item == null) return;
-        item.setExpanded(false);
-        for (TreeItem<?> child : item.getChildren()) {
-            collapseAll(child);
-        }
     }
 
     // --- Undo / Redo ---
