@@ -45,20 +45,14 @@ jobs:
         id: version
         run: echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
 
-      - name: Detect JAR filename
-        id: jar
-        run: |
-          JAR_NAME=$(ls build/libs/*-all.jar 2>/dev/null || ls build/libs/*.jar | head -1)
-          JAR_NAME=$(basename "$JAR_NAME")
-          echo "name=$JAR_NAME" >> "$GITHUB_OUTPUT"
-
       - name: Update catalog
-        if: ${{ secrets.CATALOG_PAT != '' }}
         env:
           CATALOG_PAT: ${{ secrets.CATALOG_PAT }}
           TAG: ${{ steps.version.outputs.tag }}
-          JAR_NAME: ${{ steps.jar.outputs.name }}
+        if: env.CATALOG_PAT != ''
         run: |
+          JAR_NAME=$(find build/libs -name '*.jar' ! -name '*-all.jar' -printf '%f' -quit)
+
           git clone https://x-access-token:${CATALOG_PAT}@github.com/sceriff0/flowpath-catalog.git /tmp/catalog
           cd /tmp/catalog
 
