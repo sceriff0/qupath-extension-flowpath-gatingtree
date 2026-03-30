@@ -51,7 +51,7 @@ jobs:
           TAG: ${{ steps.version.outputs.tag }}
         if: env.CATALOG_PAT != ''
         run: |
-          JAR_NAME=$(find build/libs -name '*.jar' ! -name '*-all.jar' -printf '%f' -quit)
+          JAR_NAME=$(find build/libs -name '*.jar' ! -name '*-all.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' -printf '%f' -quit)
           # GitHub normalizes spaces to dots in release asset filenames
           JAR_NAME="${JAR_NAME// /.}"
 
