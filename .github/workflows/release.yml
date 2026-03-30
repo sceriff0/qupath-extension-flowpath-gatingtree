@@ -59,7 +59,7 @@ jobs:
           cd /tmp/catalog
 
           EXTENSION_NAME="FlowPath - GatingTree"
-          DOWNLOAD_URL="https://github.com/sceriff0/qupath-extension-flowpath/releases/download/${TAG}/${JAR_NAME}"
+          DOWNLOAD_URL="https://github.com/sceriff0/qupath-extension-flowpath-gatingtree/releases/download/${TAG}/${JAR_NAME}"
 
           NEW_RELEASE=$(jq -n --arg name "$TAG" --arg url "$DOWNLOAD_URL" \
             '{name: $name, main_url: $url, version_range: {min: "v0.7.0"}}')

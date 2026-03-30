@@ -8,7 +8,7 @@ Interactive tree-based cell phenotyping for [QuPath](https://qupath.github.io/).
 
 Designed to work with the [mirage](https://github.com/sceriff0/mirage) pipeline for end-to-end multiplexed image analysis — from raw images to cell phenotypes.
 
-See also [FlowPath - qUMAP](https://github.com/sceriff0/qupath-extension-qumap) for UMAP dimensionality reduction visualization. Install both from the [FlowPath catalog](https://github.com/sceriff0/flowpath-catalog).
+See also [FlowPath - qUMAP](https://github.com/sceriff0/qupath-extension-flowpath-qumap) for UMAP dimensionality reduction visualization. Install both from the [FlowPath catalog](https://github.com/sceriff0/flowpath-catalog).
 
 <!-- Add screenshots here -->
 
@@ -41,8 +41,8 @@ Download the latest JAR from [Releases](../../releases) and drag it onto QuPath.
 ### Build from Source
 
 ```bash
-git clone https://github.com/sceriff0/qupath-extension-flowpath.git
-cd qupath-extension-flowpath
+git clone https://github.com/sceriff0/qupath-extension-flowpath-gatingtree.git
+cd qupath-extension-flowpath-gatingtree
 ./gradlew build
 # JAR at build/libs/FlowPath-1.0.0.jar → drag onto QuPath
 ```
@@ -83,7 +83,7 @@ Excluded cells (QC-filtered or outlier-excluded) are omitted when "Exclude from 
 
 If you use this tool in your research, please cite:
 
-> FlowPath: Interactive tree-based cell phenotyping for QuPath. (2026). https://github.com/sceriff0/qupath-extension-flowpath
+> FlowPath: Interactive tree-based cell phenotyping for QuPath. (2026). https://github.com/sceriff0/qupath-extension-flowpath-gatingtree
 
 ## License
 
