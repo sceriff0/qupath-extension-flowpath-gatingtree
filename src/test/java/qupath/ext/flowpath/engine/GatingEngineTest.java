@@ -367,4 +367,176 @@ class GatingEngineTest {
         assertTrue(mask[1], "Cell with NaN area should pass (NaN comparison bypassed)");
         assertTrue(mask[2], "Cell with area=150 should pass minArea=100");
     }
+
+    // ---- ancestor mask tests ----
+
+    @Test
+    void computeAncestorMaskRootGateGetsAllCells() {
+        List<String> markers = List.of("CD45");
+        double[][] values = { {1, 2, 3, 4, 5} };
+        CellIndex index = buildIndex(markers, values, null);
+        MarkerStats stats = MarkerStats.compute(index, allTrueMask(5));
+
+        GateNode root = new GateNode("CD45", 3.0);
+        root.setThresholdIsZScore(false);
+        GateTree tree = new GateTree();
+        tree.getRoots().add(root);
+
+        boolean[] mask = GatingEngine.computeAncestorMask(tree, root, index, stats, false, null);
+        // Root gate: all cells should reach it
+        for (int i = 0; i < 5; i++) {
+            assertTrue(mask[i], "Root gate should be reachable by all cells");
+        }
+    }
+
+    @Test
+    void computeAncestorMaskChildGateOnlyGetsParentBranchCells() {
+        // Parent: CD45 threshold=3.0 (raw). Cells 1,2,3 -> neg (< 3); cells 4,5 -> pos (>= 3)
+        // But cells are 1-indexed in values: {1, 2, 3, 4, 5}
+        // Cell values: 1,2 < 3 -> neg;  3,4,5 >= 3 -> pos
+        List<String> markers = List.of("CD45", "CD3");
+        double[][] values = {
+            {1, 2, 3, 4, 5},  // CD45
+            {10, 20, 30, 40, 50}  // CD3
+        };
+        CellIndex index = buildIndex(markers, values, null);
+        MarkerStats stats = MarkerStats.compute(index, allTrueMask(5));
+
+        GateNode parent = new GateNode("CD45", 3.0);
+        parent.setThresholdIsZScore(false);
+        GateNode child = new GateNode("CD3", 25.0);
+        child.setThresholdIsZScore(false);
+
+        // Add child under positive branch of parent
+        parent.getBranches().get(0).getChildren().add(child);
+
+        GateTree tree = new GateTree();
+        tree.getRoots().add(parent);
+
+        boolean[] mask = GatingEngine.computeAncestorMask(tree, child, index, stats, false, null);
+        // Only cells with CD45 >= 3.0 should reach the child gate
+        assertFalse(mask[0], "Cell CD45=1 should not reach child (neg branch)");
+        assertFalse(mask[1], "Cell CD45=2 should not reach child (neg branch)");
+        assertTrue(mask[2], "Cell CD45=3 should reach child (pos branch, >= 3)");
+        assertTrue(mask[3], "Cell CD45=4 should reach child (pos branch)");
+        assertTrue(mask[4], "Cell CD45=5 should reach child (pos branch)");
+    }
+
+    @Test
+    void computeAncestorMaskRespectsBaseMask() {
+        List<String> markers = List.of("CD45");
+        double[][] values = { {1, 2, 3, 4, 5} };
+        CellIndex index = buildIndex(markers, values, null);
+        MarkerStats stats = MarkerStats.compute(index, allTrueMask(5));
+
+        GateNode root = new GateNode("CD45", 3.0);
+        root.setThresholdIsZScore(false);
+        GateTree tree = new GateTree();
+        tree.getRoots().add(root);
+
+        // Base mask excludes cells 0 and 1
+        boolean[] baseMask = {false, false, true, true, true};
+        boolean[] mask = GatingEngine.computeAncestorMask(tree, root, index, stats, false, baseMask);
+        assertFalse(mask[0], "Cell 0 excluded by base mask");
+        assertFalse(mask[1], "Cell 1 excluded by base mask");
+        assertTrue(mask[2]);
+        assertTrue(mask[3]);
+        assertTrue(mask[4]);
+    }
+
+    @Test
+    void computeAncestorMaskChildOnNegativeBranch() {
+        // Parent: CD45 threshold=3.0. Cells 1,2 < 3 -> neg; 3,4,5 >= 3 -> pos
+        // Child is under NEGATIVE branch
+        List<String> markers = List.of("CD45", "CD3");
+        double[][] values = {
+            {1, 2, 3, 4, 5},
+            {10, 20, 30, 40, 50}
+        };
+        CellIndex index = buildIndex(markers, values, null);
+        MarkerStats stats = MarkerStats.compute(index, allTrueMask(5));
+
+        GateNode parent = new GateNode("CD45", 3.0);
+        parent.setThresholdIsZScore(false);
+        GateNode child = new GateNode("CD3", 15.0);
+        child.setThresholdIsZScore(false);
+
+        // Add child under NEGATIVE branch (index 1)
+        parent.getBranches().get(1).getChildren().add(child);
+
+        GateTree tree = new GateTree();
+        tree.getRoots().add(parent);
+
+        boolean[] mask = GatingEngine.computeAncestorMask(tree, child, index, stats, false, null);
+        assertTrue(mask[0], "Cell CD45=1 should reach child (neg branch)");
+        assertTrue(mask[1], "Cell CD45=2 should reach child (neg branch)");
+        assertFalse(mask[2], "Cell CD45=3 should NOT reach child (pos branch)");
+        assertFalse(mask[3], "Cell CD45=4 should NOT reach child (pos branch)");
+        assertFalse(mask[4], "Cell CD45=5 should NOT reach child (pos branch)");
+    }
+
+    @Test
+    void computeAncestorMaskGrandchild() {
+        // 3-level chain: grandparent -> pos -> parent -> pos -> grandchild
+        // Grandparent: CD45 >= 3 (cells 3,4,5 pass)
+        // Parent: CD3 >= 35 (cells 4,5 pass, but only from CD45+ cells)
+        // Grandchild should only see cells that are CD45+ AND CD3+
+        List<String> markers = List.of("CD45", "CD3", "CD8");
+        double[][] values = {
+            {1, 2, 3, 4, 5},
+            {10, 20, 30, 40, 50},
+            {100, 200, 300, 400, 500}
+        };
+        CellIndex index = buildIndex(markers, values, null);
+        MarkerStats stats = MarkerStats.compute(index, allTrueMask(5));
+
+        GateNode grandparent = new GateNode("CD45", 3.0);
+        grandparent.setThresholdIsZScore(false);
+        GateNode parent = new GateNode("CD3", 35.0);
+        parent.setThresholdIsZScore(false);
+        GateNode grandchild = new GateNode("CD8", 250.0);
+        grandchild.setThresholdIsZScore(false);
+
+        grandparent.getBranches().get(0).getChildren().add(parent);  // parent under CD45+
+        parent.getBranches().get(0).getChildren().add(grandchild);   // grandchild under CD3+
+
+        GateTree tree = new GateTree();
+        tree.getRoots().add(grandparent);
+
+        boolean[] mask = GatingEngine.computeAncestorMask(tree, grandchild, index, stats, false, null);
+        assertFalse(mask[0], "CD45=1 -> excluded at grandparent");
+        assertFalse(mask[1], "CD45=2 -> excluded at grandparent");
+        assertFalse(mask[2], "CD45=3, CD3=30 -> excluded at parent (CD3 < 35)");
+        assertTrue(mask[3], "CD45=4, CD3=40 -> passes both ancestors");
+        assertTrue(mask[4], "CD45=5, CD3=50 -> passes both ancestors");
+    }
+
+    @Test
+    void computeAncestorMaskDisabledAncestorPassesAll() {
+        // If an ancestor gate is disabled, it should not filter cells
+        List<String> markers = List.of("CD45", "CD3");
+        double[][] values = {
+            {1, 2, 3, 4, 5},
+            {10, 20, 30, 40, 50}
+        };
+        CellIndex index = buildIndex(markers, values, null);
+        MarkerStats stats = MarkerStats.compute(index, allTrueMask(5));
+
+        GateNode parent = new GateNode("CD45", 3.0);
+        parent.setThresholdIsZScore(false);
+        parent.setEnabled(false);  // disabled
+        GateNode child = new GateNode("CD3", 25.0);
+        child.setThresholdIsZScore(false);
+
+        parent.getBranches().get(0).getChildren().add(child);
+
+        GateTree tree = new GateTree();
+        tree.getRoots().add(parent);
+
+        boolean[] mask = GatingEngine.computeAncestorMask(tree, child, index, stats, false, null);
+        // Disabled parent should not filter — all cells reach the child
+        for (int i = 0; i < 5; i++) {
+            assertTrue(mask[i], "Cell " + i + " should reach child (parent disabled)");
+        }
+    }
 }

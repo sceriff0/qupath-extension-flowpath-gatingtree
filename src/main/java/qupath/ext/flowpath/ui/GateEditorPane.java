@@ -55,6 +55,7 @@ public class GateEditorPane extends VBox {
     private CellIndex cellIndex;
     private MarkerStats markerStats;
     private boolean[] roiMask;
+    private boolean[] ancestorMask;
     private boolean suppressEvents = false;
     // Non-null only when a 2D gate editor (quadrant/polygon/rect/ellipse) is active.
     // Used by shared clip controls to update axis range. Cleared in setGateNode().
@@ -720,6 +721,7 @@ public class GateEditorPane extends VBox {
             refreshScatterPlot();
         }
     }
+    public void setAncestorMask(boolean[] mask) { this.ancestorMask = mask; }
     public void setOnNodeChanged(Consumer<GateNode> callback) { this.onNodeChanged = callback; }
     public void setOnAddToPositive(Runnable callback) { this.onAddToPositive = callback; }
     public void setOnAddToNegative(Runnable callback) { this.onAddToNegative = callback; }
@@ -769,15 +771,25 @@ public class GateEditorPane extends VBox {
     private double[][] getFilteredXY(int mxIdx, int myIdx) {
         double[] allX = cellIndex.getMarkerValues(mxIdx);
         double[] allY = cellIndex.getMarkerValues(myIdx);
-        if (roiMask == null) return new double[][]{allX, allY};
+        boolean hasMask = roiMask != null || ancestorMask != null;
+        if (!hasMask) return new double[][]{allX, allY};
         int count = 0;
-        for (boolean b : roiMask) if (b) count++;
+        for (int i = 0; i < allX.length; i++) {
+            if (passesMasks(i)) count++;
+        }
         double[] fx = new double[count], fy = new double[count];
         int j = 0;
         for (int i = 0; i < allX.length; i++) {
-            if (roiMask[i]) { fx[j] = allX[i]; fy[j] = allY[i]; j++; }
+            if (passesMasks(i)) { fx[j] = allX[i]; fy[j] = allY[i]; j++; }
         }
         return new double[][]{fx, fy};
+    }
+
+    /** Check if a cell index passes both ROI mask and ancestor mask. */
+    private boolean passesMasks(int i) {
+        if (roiMask != null && !roiMask[i]) return false;
+        if (ancestorMask != null && !ancestorMask[i]) return false;
+        return true;
     }
 
     private void updateHistogram() {
@@ -788,14 +800,15 @@ public class GateEditorPane extends VBox {
         if (markerIdx < 0) return;
 
         double[] allValues = cellIndex.getMarkerValues(markerIdx);
-        // Filter by ROI mask if active
+        // Filter by ROI mask and ancestor mask
+        boolean hasMask = roiMask != null || ancestorMask != null;
         double[] rawValues;
-        if (roiMask != null) {
+        if (hasMask) {
             int count = 0;
-            for (int i = 0; i < allValues.length; i++) if (roiMask[i]) count++;
+            for (int i = 0; i < allValues.length; i++) if (passesMasks(i)) count++;
             rawValues = new double[count];
             int j = 0;
-            for (int i = 0; i < allValues.length; i++) if (roiMask[i]) rawValues[j++] = allValues[i];
+            for (int i = 0; i < allValues.length; i++) if (passesMasks(i)) rawValues[j++] = allValues[i];
         } else {
             rawValues = allValues;
         }

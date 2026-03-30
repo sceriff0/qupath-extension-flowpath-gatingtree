@@ -209,6 +209,149 @@ public final class GatingEngine {
         return result;
     }
 
+    /**
+     * Compute a boolean mask indicating which cells would reach a specific gate node
+     * by passing through all ancestor gates/branches in the tree hierarchy.
+     * Root gates get all non-excluded cells. Child gates only get cells that passed
+     * through their parent gate's branch.
+     *
+     * @param tree      the gate tree
+     * @param target    the gate node to compute the ancestor mask for
+     * @param index     columnar cell data
+     * @param stats     per-marker statistics
+     * @param useZScore whether thresholds compare z-scored values
+     * @param baseMask  optional base mask (ROI + quality); null means all cells pass
+     * @return boolean array where {@code true} means the cell reaches this gate
+     */
+    public static boolean[] computeAncestorMask(GateTree tree, GateNode target,
+                                                 CellIndex index, MarkerStats stats,
+                                                 boolean useZScore, boolean[] baseMask) {
+        int n = index.size();
+        boolean[] mask = new boolean[n];
+
+        // Find the path from root to the target node
+        java.util.List<Object> path = new java.util.ArrayList<>();
+        if (!findPath(tree.getRoots(), target, path)) {
+            // Target is a root node — all non-excluded cells reach it
+            Arrays.fill(mask, true);
+            if (baseMask != null) {
+                for (int i = 0; i < n; i++) mask[i] = baseMask[i];
+            }
+            return mask;
+        }
+
+        // Start with base mask (all cells that pass QF + ROI)
+        if (baseMask != null) {
+            System.arraycopy(baseMask, 0, mask, 0, n);
+        } else {
+            Arrays.fill(mask, true);
+        }
+
+        // Walk path: each entry is alternating GateNode, Branch (the branch the child is under)
+        // For each ancestor gate+branch pair, keep only cells that land in that branch
+        for (int p = 0; p < path.size(); p += 2) {
+            GateNode gate = (GateNode) path.get(p);
+            Branch branch = (Branch) path.get(p + 1);
+            if (!gate.isEnabled()) continue;
+
+            int branchIdx = gate.getBranches().indexOf(branch);
+            for (int i = 0; i < n; i++) {
+                if (!mask[i]) continue;
+                int result = evaluateGate(gate, i, index, stats, useZScore);
+                if (result < 0 || result != branchIdx) {
+                    mask[i] = false;
+                }
+            }
+        }
+
+        return mask;
+    }
+
+    /**
+     * Find the path of (GateNode, Branch) pairs from a root to the target node.
+     * Returns true if target is found as a child (not a root).
+     */
+    private static boolean findPath(List<GateNode> nodes, GateNode target, List<Object> path) {
+        for (GateNode node : nodes) {
+            for (Branch branch : node.getBranches()) {
+                if (branch.getChildren().contains(target)) {
+                    path.add(node);
+                    path.add(branch);
+                    return true;
+                }
+                // Recurse deeper
+                if (findPath(branch.getChildren(), target, path)) {
+                    path.add(0, node);
+                    path.add(1, branch);
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Evaluate which branch index a single cell falls into for a gate.
+     * Returns -1 if the cell would be excluded (outlier).
+     */
+    private static int evaluateGate(GateNode node, int cellIdx,
+                                     CellIndex index, MarkerStats stats, boolean useZScore) {
+        if (node instanceof QuadrantGate qg) {
+            int mxIdx = index.getMarkerIndex(qg.getChannelX());
+            int myIdx = index.getMarkerIndex(qg.getChannelY());
+            if (mxIdx < 0 || myIdx < 0) return -1;
+            double rawX = index.getMarkerValues(mxIdx)[cellIdx];
+            double rawY = index.getMarkerValues(myIdx)[cellIdx];
+            if (node.isExcludeOutliers()) {
+                double loX = stats.getPercentileValue(qg.getChannelX(), node.getClipPercentileLow());
+                double hiX = stats.getPercentileValue(qg.getChannelX(), node.getClipPercentileHigh());
+                if (rawX < loX || rawX > hiX) return -1;
+                double loY = stats.getPercentileValue(qg.getChannelY(), node.getClipPercentileLow());
+                double hiY = stats.getPercentileValue(qg.getChannelY(), node.getClipPercentileHigh());
+                if (rawY < loY || rawY > hiY) return -1;
+            }
+            double cx = useZScore ? stats.toZScore(qg.getChannelX(), rawX) : rawX;
+            double cy = useZScore ? stats.toZScore(qg.getChannelY(), rawY) : rawY;
+            return qg.evaluateQuadrant(cx, cy);
+        } else if (node instanceof PolygonGate || node instanceof RectangleGate || node instanceof EllipseGate) {
+            List<String> channels = node.getChannels();
+            if (channels.size() < 2) return -1;
+            int mxIdx = index.getMarkerIndex(channels.get(0));
+            int myIdx = index.getMarkerIndex(channels.get(1));
+            if (mxIdx < 0 || myIdx < 0) return -1;
+            double rawX = index.getMarkerValues(mxIdx)[cellIdx];
+            double rawY = index.getMarkerValues(myIdx)[cellIdx];
+            if (node.isExcludeOutliers()) {
+                double loX = stats.getPercentileValue(channels.get(0), node.getClipPercentileLow());
+                double hiX = stats.getPercentileValue(channels.get(0), node.getClipPercentileHigh());
+                if (rawX < loX || rawX > hiX) return -1;
+                double loY = stats.getPercentileValue(channels.get(1), node.getClipPercentileLow());
+                double hiY = stats.getPercentileValue(channels.get(1), node.getClipPercentileHigh());
+                if (rawY < loY || rawY > hiY) return -1;
+            }
+            double vx = useZScore ? stats.toZScore(channels.get(0), rawX) : rawX;
+            double vy = useZScore ? stats.toZScore(channels.get(1), rawY) : rawY;
+            boolean inside;
+            if (node instanceof PolygonGate pg) inside = pg.contains(vx, vy);
+            else if (node instanceof RectangleGate rg) inside = rg.contains(vx, vy);
+            else inside = ((EllipseGate) node).contains(vx, vy);
+            return inside ? 0 : 1;
+        } else {
+            // Threshold gate
+            String channel = node.getChannel();
+            int mIdx = index.getMarkerIndex(channel);
+            if (mIdx < 0) return -1;
+            double rawValue = index.getMarkerValues(mIdx)[cellIdx];
+            if (node.isExcludeOutliers()) {
+                double lo = stats.getPercentileValue(channel, node.getClipPercentileLow());
+                double hi = stats.getPercentileValue(channel, node.getClipPercentileHigh());
+                if (rawValue < lo || rawValue > hi) return -1;
+            }
+            double compareValue = useZScore ? stats.toZScore(channel, rawValue) : rawValue;
+            return compareValue >= node.getThreshold() ? 0 : 1;
+        }
+    }
+
     // ---- private helpers ----
 
     private static void walkRoots(List<GateNode> roots, int cellIdx,

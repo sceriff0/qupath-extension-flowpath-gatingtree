@@ -266,6 +266,7 @@ public class FlowPathPane extends BorderPane {
         previewService.setOnStatsRecomputed(() -> {
             editorPane.setMarkerStats(previewService.getMarkerStats());
             recomputeQualityMask();
+            refreshAncestorMask();
         });
 
         // Listen for annotation changes (add/remove) to recompute ROI mask
@@ -275,6 +276,7 @@ public class FlowPathPane extends BorderPane {
             if (!event.isChanging() && gateTree.isRoiFilterEnabled()) {
                 Platform.runLater(() -> {
                     recomputeRoiMask();
+                    refreshAncestorMask();
                     editorPane.setRoiMask(cachedRoiMask);
                     previewService.recomputeStats();
                 });
@@ -527,19 +529,40 @@ public class FlowPathPane extends BorderPane {
     private void onTreeSelectionChanged(TreeItem<Object> selected) {
         if (suppressTreeSelection) return;
         if (selected == null) {
+            editorPane.setAncestorMask(null);
             editorPane.setGateNode(null);
             return;
         }
 
         Object item = selected.getValue();
-        if (item instanceof GateNode node) {
-            currentNode = node;
-            editorPane.setGateNode(node);
+        GateNode node = null;
+        if (item instanceof GateNode gn) {
+            node = gn;
         } else if (item instanceof FlowPathCell.BranchItem branch) {
-            currentNode = branch.parentGate;
-            editorPane.setGateNode(branch.parentGate);
+            node = branch.parentGate;
+        }
+
+        if (node != null) {
+            currentNode = node;
+            editorPane.setAncestorMask(computeAncestorMask(node));
+            editorPane.setGateNode(node);
         } else {
+            editorPane.setAncestorMask(null);
             editorPane.setGateNode(null);
+        }
+    }
+
+    private boolean[] computeAncestorMask(GateNode node) {
+        if (cellIndex == null || markerStats == null) return null;
+        boolean[] baseMask = getCombinedMask();
+        return GatingEngine.computeAncestorMask(gateTree, node, cellIndex, markerStats,
+                editorPane.isUseZScore(), baseMask);
+    }
+
+    /** Recompute and apply the ancestor mask for the currently selected gate. */
+    private void refreshAncestorMask() {
+        if (currentNode != null) {
+            editorPane.setAncestorMask(computeAncestorMask(currentNode));
         }
     }
 
@@ -596,6 +619,7 @@ public class FlowPathPane extends BorderPane {
     private void onRoiFilterToggled() {
         gateTree.setRoiFilterEnabled(roiFilterCheckBox.isSelected());
         recomputeRoiMask();
+        refreshAncestorMask();
         editorPane.setRoiMask(cachedRoiMask);
         previewService.recomputeStats();
     }
@@ -617,6 +641,7 @@ public class FlowPathPane extends BorderPane {
     private void onQualityFilterChanged() {
         if (cellIndex == null) return;
         recomputeQualityMask();
+        refreshAncestorMask();
         // Recompute stats on background thread, then trigger preview update
         previewService.recomputeStats();
     }
