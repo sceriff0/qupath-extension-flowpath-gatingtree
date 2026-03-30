@@ -94,7 +94,9 @@ public class GateEditorPane extends VBox {
         modeGroup.selectedToggleProperty().addListener((obs, old, val) -> {
             if (!suppressEvents && currentNode != null) {
                 currentNode.setThresholdIsZScore(zscoreModeBtn.isSelected());
-                updateHistogram();
+                if (isThresholdGate(currentNode)) {
+                    updateHistogram();
+                }
                 fireNodeChanged();
             }
         });
@@ -289,7 +291,9 @@ public class GateEditorPane extends VBox {
             buildActionButtons(node);
         });
 
-        updateHistogram();
+        if (isThresholdGate(node)) {
+            updateHistogram();
+        }
     }
 
     // ---- Gate-type-specific editor builders ----
@@ -624,12 +628,14 @@ public class GateEditorPane extends VBox {
             nameField.setPrefWidth(120);
             nameField.textProperty().addListener((obs, old, val) -> {
                 if (!suppressEvents && val != null && !val.isBlank()) {
-                    // Use currentNode's branches to avoid stale references after gate replacement
                     if (currentNode != null && idx < currentNode.getBranches().size()) {
                         currentNode.getBranches().get(idx).setName(val);
                     }
-                    fireNodeChanged();
                 }
+            });
+            nameField.setOnAction(e -> fireNodeChanged());
+            nameField.focusedProperty().addListener((obs, old, focused) -> {
+                if (!focused) fireNodeChanged();
             });
 
             ColorPicker colorPicker = new ColorPicker(ColorUtils.intToColor(branch.getColor()));
@@ -827,6 +833,11 @@ public class GateEditorPane extends VBox {
         if (lo == hi || hi >= sorted.length) return sorted[Math.min(lo, sorted.length - 1)];
         double frac = idx - lo;
         return sorted[lo] * (1 - frac) + sorted[hi] * frac;
+    }
+
+    private boolean isThresholdGate(GateNode node) {
+        return !(node instanceof QuadrantGate) && !(node instanceof PolygonGate)
+                && !(node instanceof RectangleGate) && !(node instanceof EllipseGate);
     }
 
     private void withSuppressedEvents(Runnable action) {

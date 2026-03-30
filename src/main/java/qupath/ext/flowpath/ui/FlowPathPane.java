@@ -451,7 +451,9 @@ public class FlowPathPane extends BorderPane {
         }
 
         editorPane.setGateNode(null);
+        suppressTreeSelection = true;
         rebuildTreeView();
+        suppressTreeSelection = false;
         requestPreviewUpdate();
     }
 
@@ -574,8 +576,13 @@ public class FlowPathPane extends BorderPane {
             ROI roi = ann.getROI();
             if (roi != null) rois.add(roi);
         }
-        cachedRoiMask = GatingEngine.computeRoiMask(cellIndex, rois);
-        previewService.setRoiMask(cachedRoiMask);
+        if (rois.isEmpty()) {
+            cachedRoiMask = null;
+            previewService.setRoiMask(null);
+        } else {
+            cachedRoiMask = GatingEngine.computeRoiMask(cellIndex, rois);
+            previewService.setRoiMask(cachedRoiMask);
+        }
     }
 
     private boolean[] getCombinedMask() {
