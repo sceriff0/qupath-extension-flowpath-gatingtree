@@ -1,4 +1,4 @@
-# QuPath Extension: FlowPath
+# QuPath Extension: FlowPath - GatingTree
 
 [![QuPath](https://img.shields.io/badge/QuPath-%E2%89%A50.7.0-blue.svg)](https://qupath.github.io/)
 [![Java](https://img.shields.io/badge/Java-25-orange.svg)](https://jdk.java.net/25/)
@@ -31,7 +31,7 @@ See also [FlowPath - qUMAP](https://github.com/sceriff0/qupath-extension-flowpat
 
 1. Open QuPath → `Extensions` → `Manage extensions` → `Manage extension catalogs` → `Add`
 2. Paste: `https://raw.githubusercontent.com/sceriff0/flowpath-catalog/main/catalog.json`
-3. Go back to `Manage extensions` → find **FlowPath** → click `+` to install
+3. Go back to `Manage extensions` → find **FlowPath - GatingTree** → click `+` to install
 4. Restart QuPath
 
 ### From Release JAR
@@ -51,7 +51,7 @@ cd qupath-extension-flowpath-gatingtree
 
 1. Open your pyramidal OME-TIFF in QuPath
 2. Import cell detections (GeoJSON with marker intensities, e.g., from [mirage](https://github.com/sceriff0/mirage))
-3. `Extensions` > `FlowPath` (or `Ctrl+G`)
+3. `Extensions` > `FlowPath - GatingTree` (or `Ctrl+G`)
 4. Set quality filters to remove segmentation artifacts (area, eccentricity, solidity, perimeter, total intensity)
 5. Add root gate → pick gate type (threshold, quadrant, polygon, rectangle, ellipse)
 6. For threshold gates: select channel → drag threshold on histogram
@@ -62,7 +62,7 @@ cd qupath-extension-flowpath-gatingtree
 
 ## Output Formats
 
-**FlowPath JSON** (`flowpath.json`) — Saves the full gate hierarchy, thresholds, colors, and quality filter settings. Load to reproduce gating.
+**GatingTree JSON** (`flowpath.json`) — Saves the full gate hierarchy, thresholds, colors, and quality filter settings. Load to reproduce gating.
 
 **Phenotype CSV** (`gate_pheno.csv`) — One row per cell with phenotype name and per-marker +/- status:
 
