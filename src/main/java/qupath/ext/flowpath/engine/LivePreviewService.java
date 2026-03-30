@@ -49,6 +49,13 @@ public class LivePreviewService {
     /** Count of excluded cells from the most recent gating run (updated on FX thread). */
     private int lastExcludedCount;
 
+    /**
+     * Guard flag set while {@link #applyResult} is firing a hierarchy changed event.
+     * Listeners can check {@link #isFiringHierarchyEvent()} to avoid reacting to
+     * events that originated from our own gating update.
+     */
+    private boolean firingHierarchyEvent;
+
     public LivePreviewService() {
         this.executor = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "flowpath-preview");
@@ -103,6 +110,15 @@ public class LivePreviewService {
 
     public int getLastExcludedCount() {
         return lastExcludedCount;
+    }
+
+    /**
+     * Returns {@code true} while this service is firing a hierarchy changed event
+     * as part of applying gating results. Hierarchy listeners should check this
+     * to avoid feedback loops.
+     */
+    public boolean isFiringHierarchyEvent() {
+        return firingHierarchyEvent;
     }
 
     // ---- public API ----
@@ -220,19 +236,29 @@ public class LivePreviewService {
         PathClass excludedClass = PathClass.fromString("Excluded", excludedColor);
         excludedClass.setColor(excludedColor);
 
+        boolean anyChanged = false;
         for (int i = 0; i < n; i++) {
             PathObject obj = index.getObject(i);
             if (obj == null) {
                 continue;
             }
-            if (excluded[i]) {
-                obj.setPathClass(excludedClass);
-            } else {
-                obj.setPathClass(classCache.get(phenotypes[i]));
+            PathClass newClass = excluded[i] ? excludedClass : classCache.get(phenotypes[i]);
+            if (!java.util.Objects.equals(obj.getPathClass(), newClass)) {
+                obj.setPathClass(newClass);
+                anyChanged = true;
             }
         }
 
-        data.getHierarchy().fireHierarchyChangedEvent(this);
+        // Only fire hierarchy event if any classification actually changed,
+        // and set guard flag so our own hierarchy listener doesn't re-trigger gating
+        if (anyChanged) {
+            firingHierarchyEvent = true;
+            try {
+                data.getHierarchy().fireHierarchyChangedEvent(this);
+            } finally {
+                firingHierarchyEvent = false;
+            }
+        }
 
         if (onUpdateComplete != null) {
             onUpdateComplete.run();

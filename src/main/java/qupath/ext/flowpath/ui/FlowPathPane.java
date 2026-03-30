@@ -270,6 +270,8 @@ public class FlowPathPane extends BorderPane {
 
         // Listen for annotation changes (add/remove) to recompute ROI mask
         hierarchyListener = event -> {
+            // Skip events fired by our own gating update to prevent feedback loops
+            if (previewService.isFiringHierarchyEvent()) return;
             if (!event.isChanging() && gateTree.isRoiFilterEnabled()) {
                 Platform.runLater(() -> {
                     recomputeRoiMask();
