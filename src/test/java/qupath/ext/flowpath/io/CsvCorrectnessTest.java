@@ -82,8 +82,8 @@ class CsvCorrectnessTest {
     }
 
     private CsvResult run(GateTree tree, CellIndex index, MarkerStats stats,
-                          boolean useZScore, String name) throws IOException {
-        AssignmentResult result = GatingEngine.assignAll(tree, index, stats, useZScore);
+                          String name) throws IOException {
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
         File f = tempDir.resolve(name).toFile();
         PhenotypeCsvExporter.export(f, index, result, tree, stats);
         List<String> lines = Files.readAllLines(f.toPath());
@@ -113,7 +113,7 @@ class CsvCorrectnessTest {
         tree.setQualityFilter(null);
         tree.addRoot(gate1);
 
-        CsvResult csv = run(tree, index, stats, false, "raw.csv");
+        CsvResult csv = run(tree, index, stats, "raw.csv");
 
         // Cell 0: CD45=2.5, CD3=1.1
         assertEquals("2.5000", csv.val(0, "CD45_raw"));
@@ -137,7 +137,7 @@ class CsvCorrectnessTest {
         tree.setQualityFilter(null);
         tree.addRoot(gate);
 
-        CsvResult csv = run(tree, index, stats, false, "ungated.csv");
+        CsvResult csv = run(tree, index, stats, "ungated.csv");
 
         // All 3 markers should have raw columns
         assertEquals("2.0000", csv.val(0, "CD45_raw"));
@@ -166,7 +166,7 @@ class CsvCorrectnessTest {
         tree.setQualityFilter(null);
         tree.addRoot(gate);
 
-        CsvResult csv = run(tree, index, stats, true, "zscore.csv");
+        CsvResult csv = run(tree, index, stats, "zscore.csv");
 
         double mean = stats.getMean("CD45");
         double std = stats.getStd("CD45");
@@ -195,7 +195,7 @@ class CsvCorrectnessTest {
         tree.setQualityFilter(null);
         tree.addRoot(gate);
 
-        CsvResult csv = run(tree, index, stats, false, "locale.csv");
+        CsvResult csv = run(tree, index, stats, "locale.csv");
 
         String raw = csv.val(0, "CD45_raw");
         assertTrue(raw.contains("."), "Decimal should use dot, got: " + raw);
@@ -227,7 +227,7 @@ class CsvCorrectnessTest {
         tree.setQualityFilter(null);
         tree.addRoot(gate);
 
-        AssignmentResult result = GatingEngine.assignAll(tree, index, stats, false);
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
         assertTrue(result.getExcluded()[98], "Cell 98 (outlier -500) should be excluded");
         assertTrue(result.getExcluded()[99], "Cell 99 (outlier 500) should be excluded");
     }
@@ -255,7 +255,7 @@ class CsvCorrectnessTest {
         tree.setQualityFilter(null);
         tree.addRoot(gate);
 
-        AssignmentResult result = GatingEngine.assignAll(tree, index, stats, false);
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
         assertTrue(result.getExcluded()[98], "Cell 98 (CD45 outlier) should be excluded");
         assertTrue(result.getExcluded()[99], "Cell 99 (CD3 outlier) should be excluded");
     }
@@ -281,7 +281,7 @@ class CsvCorrectnessTest {
         tree.setQualityFilter(null);
         tree.addRoot(gate);
 
-        AssignmentResult result = GatingEngine.assignAll(tree, index, stats, true);
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
 
         // Cell 0: CD45=1 (z<0), CD3=1 (z<0) -> NN
         assertEquals("CD45-/CD3-", result.getPhenotypes()[0]);
@@ -297,22 +297,23 @@ class CsvCorrectnessTest {
 
     @Test
     void rectangleGateWithZScoreMode() throws IOException {
-        // Rectangle gate in z-score space: bounds from -0.5 to 0.5 on both axes
-        // CD45 values [1,5,9], mean=5, std≈3.27
-        // z-scores: -1.22, 0.0, 1.22
-        // Only cell 1 (z=0) is inside [-0.5, 0.5]
+        // Region gate with z-score mode: boundaries are in z-score space (drawn on z-score scatter).
+        // CD45 values [1,5,9], mean=5, std≈3.27 → z-scores: -1.22, 0.0, 1.22
+        // Gate bounds [-0.5, 0.5] in z-score space → only cell 1 (z=0) is inside.
         List<String> markers = List.of("CD45", "CD3");
         double[][] values = { {1, 5, 9}, {1, 5, 9} };
         CellIndex index = buildIndex(markers, values, null);
         MarkerStats stats = MarkerStats.compute(index, allTrueMask(3));
 
         RectangleGate gate = new RectangleGate("CD45", "CD3", -0.5, 0.5, -0.5, 0.5);
+        gate.setThresholdIsZScore(true);
 
         GateTree tree = new GateTree();
         tree.setQualityFilter(null);
         tree.addRoot(gate);
 
-        AssignmentResult result = GatingEngine.assignAll(tree, index, stats, true);
+        // Per-gate z-score flag controls evaluation space
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
 
         String insideName = gate.getBranches().get(0).getName();
         String outsideName = gate.getBranches().get(1).getName();
@@ -320,6 +321,32 @@ class CsvCorrectnessTest {
         assertEquals(outsideName, result.getPhenotypes()[0], "Cell 0 z=-1.22 should be outside");
         assertEquals(insideName, result.getPhenotypes()[1], "Cell 1 z=0 should be inside");
         assertEquals(outsideName, result.getPhenotypes()[2], "Cell 2 z=1.22 should be outside");
+    }
+
+    @Test
+    void rectangleGateRawMode() throws IOException {
+        // Region gate in raw mode: boundaries are in raw data space.
+        // CD45 values [1, 5, 9] → gate bounds [3, 7] → only cell 1 (val=5) is inside.
+        List<String> markers = List.of("CD45", "CD3");
+        double[][] values = { {1, 5, 9}, {1, 5, 9} };
+        CellIndex index = buildIndex(markers, values, null);
+        MarkerStats stats = MarkerStats.compute(index, allTrueMask(3));
+
+        RectangleGate gate = new RectangleGate("CD45", "CD3", 3, 7, 3, 7);
+        gate.setThresholdIsZScore(false);
+
+        GateTree tree = new GateTree();
+        tree.setQualityFilter(null);
+        tree.addRoot(gate);
+
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
+
+        String insideName = gate.getBranches().get(0).getName();
+        String outsideName = gate.getBranches().get(1).getName();
+
+        assertEquals(outsideName, result.getPhenotypes()[0], "Cell 0 (val=1) should be outside [3,7]");
+        assertEquals(insideName, result.getPhenotypes()[1], "Cell 1 (val=5) should be inside [3,7]");
+        assertEquals(outsideName, result.getPhenotypes()[2], "Cell 2 (val=9) should be outside [3,7]");
     }
 
     // ========== Gap 12: Sign columns for 2D region gates ==========
@@ -338,7 +365,7 @@ class CsvCorrectnessTest {
         tree.setQualityFilter(null);
         tree.addRoot(gate);
 
-        CsvResult csv = run(tree, index, stats, false, "region_signs.csv");
+        CsvResult csv = run(tree, index, stats, "region_signs.csv");
 
         // Cell 0: (5,5) inside → both signs "+"
         assertEquals("+", csv.val(0, "CD45_sign"));
@@ -366,7 +393,7 @@ class CsvCorrectnessTest {
         tree.setQualityFilter(null);
         tree.addRoot(gate);
 
-        CsvResult csv = run(tree, index, stats, false, "quad_signs.csv");
+        CsvResult csv = run(tree, index, stats, "quad_signs.csv");
 
         // Cell 0: PP → CD45+, CD3+
         assertEquals("+", csv.val(0, "CD45_sign"));
@@ -401,7 +428,7 @@ class CsvCorrectnessTest {
         tree.setQualityFilter(null);
         tree.addRoot(gate);
 
-        CsvResult csv = run(tree, index, stats, false, "large.csv");
+        CsvResult csv = run(tree, index, stats, "large.csv");
         assertEquals(n, csv.rows.size(), "All 500 cells should be in CSV");
 
         // Verify first and last rows have correct raw values
@@ -525,7 +552,7 @@ class CsvCorrectnessTest {
         tree.setQualityFilter(null);
         tree.addRoot(gate);
 
-        CsvResult csv = run(tree, index, stats, false, "zero_std.csv");
+        CsvResult csv = run(tree, index, stats, "zero_std.csv");
 
         // Z-score should be empty (NaN → "") when std is zero
         assertEquals("", csv.val(0, "CD45_zscore"));
@@ -588,7 +615,7 @@ class CsvCorrectnessTest {
         tree.setQualityFilter(qf);
         tree.addRoot(gate);
 
-        CsvResult csv = run(tree, index, stats, false, "qf_outlier.csv");
+        CsvResult csv = run(tree, index, stats, "qf_outlier.csv");
 
         // At least 2 excluded by QF + 1 outlier. Percentile clipping may exclude boundary cells too.
         assertTrue(csv.rows.size() < nNormal + 3, "Some cells should be excluded");
@@ -630,7 +657,7 @@ class CsvCorrectnessTest {
         tree.setQualityFilter(qf);
         tree.addRoot(gate);
 
-        CsvResult csv = run(tree, index, stats, false, "qf_quad.csv");
+        CsvResult csv = run(tree, index, stats, "qf_quad.csv");
 
         assertEquals(5, csv.rows.size(), "Cell 0 excluded by QF");
         // Cell 1: CD45=8,CD3=8 → PP
@@ -657,7 +684,7 @@ class CsvCorrectnessTest {
         tree.setQualityFilter(qf);
         tree.addRoot(gate);
 
-        CsvResult csv = run(tree, index, stats, false, "qf_rect.csv");
+        CsvResult csv = run(tree, index, stats, "qf_rect.csv");
 
         assertEquals(2, csv.rows.size(), "Cell 0 excluded by QF");
         String insideName = gate.getBranches().get(0).getName();
@@ -692,7 +719,7 @@ class CsvCorrectnessTest {
         tree.addRoot(enabled);
         tree.addRoot(disabled);
 
-        CsvResult csv = run(tree, index, stats, false, "disabled_qf.csv");
+        CsvResult csv = run(tree, index, stats, "disabled_qf.csv");
 
         assertEquals(2, csv.rows.size());
         // Cell 1: CD45=8 >= 5 → CD45+, CD3 gate disabled
@@ -724,7 +751,7 @@ class CsvCorrectnessTest {
         tree.setQualityFilter(null);
         tree.addRoot(root);
 
-        CsvResult csv = run(tree, index, stats, false, "thresh_quad.csv");
+        CsvResult csv = run(tree, index, stats, "thresh_quad.csv");
 
         assertEquals(3, csv.rows.size());
         assertEquals("CD45-", csv.val(0, "phenotype"));
@@ -769,7 +796,7 @@ class CsvCorrectnessTest {
         tree.setQualityFilter(null);
         tree.addRoot(quad);
 
-        CsvResult csv = run(tree, index, stats, false, "quad_rect.csv");
+        CsvResult csv = run(tree, index, stats, "quad_rect.csv");
 
         assertEquals(3, csv.rows.size());
         // Cell 0: PP → inside rect
@@ -804,7 +831,7 @@ class CsvCorrectnessTest {
         tree.setQualityFilter(null);
         tree.addRoot(gate);
 
-        CsvResult csv = run(tree, index, stats, false, "outlier_xy.csv");
+        CsvResult csv = run(tree, index, stats, "outlier_xy.csv");
 
         // Cells 3 and 4 excluded by outlier on X and Y respectively
         assertEquals(3, csv.rows.size(), "2 outlier cells excluded, 3 remaining");
@@ -862,7 +889,7 @@ class CsvCorrectnessTest {
         tree.addRoot(root);
         tree.addRoot(disabledGate);
 
-        CsvResult csv = run(tree, index, stats, false, "full_pipeline.csv");
+        CsvResult csv = run(tree, index, stats, "full_pipeline.csv");
 
         // QF excludes cells 0,1 (areas 50, 55)
         // Outlier excludes cell 99 (CD45=-500)

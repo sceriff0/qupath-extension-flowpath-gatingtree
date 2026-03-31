@@ -92,7 +92,7 @@ class GatingEngineTest {
         tree.setQualityFilter(null);
         tree.addRoot(gate);
 
-        AssignmentResult result = GatingEngine.assignAll(tree, index, stats, false);
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
 
         int posCount = 0;
         int negCount = 0;
@@ -122,7 +122,7 @@ class GatingEngineTest {
         tree.setQualityFilter(null);
         tree.addRoot(gate);
 
-        AssignmentResult result = GatingEngine.assignAll(tree, index, stats, true);
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
 
         // mean = 5.5, so values >= 5.5 have z >= 0 -> positive
         // Values 6,7,8,9,10 -> positive (5); values 1,2,3,4,5 -> negative (5)
@@ -211,7 +211,7 @@ class GatingEngineTest {
         tree.setQualityFilter(null);
         tree.addRoot(gate);
 
-        AssignmentResult result = GatingEngine.assignAll(tree, index, stats, false);
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
 
         // The two outlier cells should be excluded
         boolean[] excluded = result.getExcluded();
@@ -247,7 +247,7 @@ class GatingEngineTest {
         tree.setQualityFilter(null);
         tree.addRoot(root);
 
-        AssignmentResult result = GatingEngine.assignAll(tree, index, stats, false);
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
         String[] phenotypes = result.getPhenotypes();
 
         // Cells 0-4 (CD45 values 1-5): CD45- (no children on negative branch)
@@ -281,7 +281,7 @@ class GatingEngineTest {
         tree.setQualityFilter(null);
         tree.addRoot(gate);
 
-        AssignmentResult result = GatingEngine.assignAll(tree, index, stats, false);
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
 
         for (int i = 0; i < 5; i++) {
             assertEquals("Unclassified", result.getPhenotypes()[i],
@@ -300,7 +300,7 @@ class GatingEngineTest {
         GateTree tree = new GateTree();
         tree.setQualityFilter(null);
 
-        AssignmentResult result = GatingEngine.assignAll(tree, index, stats, false);
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
 
         for (int i = 0; i < 5; i++) {
             assertEquals("Unclassified", result.getPhenotypes()[i],
@@ -331,7 +331,7 @@ class GatingEngineTest {
         boolean[] mask = allTrueMask(5);
         MarkerStats stats = MarkerStats.compute(index, mask);
 
-        AssignmentResult result = GatingEngine.assignAll(tree, index, stats, false);
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
 
         for (int i = 0; i < 5; i++) {
             assertTrue(result.getExcluded()[i], "Cell " + i + " should be excluded");
@@ -382,7 +382,7 @@ class GatingEngineTest {
         GateTree tree = new GateTree();
         tree.getRoots().add(root);
 
-        boolean[] mask = GatingEngine.computeAncestorMask(tree, root, index, stats, false, null);
+        boolean[] mask = GatingEngine.computeAncestorMask(tree, root, index, stats, null);
         // Root gate: all cells should reach it
         for (int i = 0; i < 5; i++) {
             assertTrue(mask[i], "Root gate should be reachable by all cells");
@@ -413,7 +413,7 @@ class GatingEngineTest {
         GateTree tree = new GateTree();
         tree.getRoots().add(parent);
 
-        boolean[] mask = GatingEngine.computeAncestorMask(tree, child, index, stats, false, null);
+        boolean[] mask = GatingEngine.computeAncestorMask(tree, child, index, stats, null);
         // Only cells with CD45 >= 3.0 should reach the child gate
         assertFalse(mask[0], "Cell CD45=1 should not reach child (neg branch)");
         assertFalse(mask[1], "Cell CD45=2 should not reach child (neg branch)");
@@ -436,7 +436,7 @@ class GatingEngineTest {
 
         // Base mask excludes cells 0 and 1
         boolean[] baseMask = {false, false, true, true, true};
-        boolean[] mask = GatingEngine.computeAncestorMask(tree, root, index, stats, false, baseMask);
+        boolean[] mask = GatingEngine.computeAncestorMask(tree, root, index, stats, baseMask);
         assertFalse(mask[0], "Cell 0 excluded by base mask");
         assertFalse(mask[1], "Cell 1 excluded by base mask");
         assertTrue(mask[2]);
@@ -467,7 +467,7 @@ class GatingEngineTest {
         GateTree tree = new GateTree();
         tree.getRoots().add(parent);
 
-        boolean[] mask = GatingEngine.computeAncestorMask(tree, child, index, stats, false, null);
+        boolean[] mask = GatingEngine.computeAncestorMask(tree, child, index, stats, null);
         assertTrue(mask[0], "Cell CD45=1 should reach child (neg branch)");
         assertTrue(mask[1], "Cell CD45=2 should reach child (neg branch)");
         assertFalse(mask[2], "Cell CD45=3 should NOT reach child (pos branch)");
@@ -503,7 +503,7 @@ class GatingEngineTest {
         GateTree tree = new GateTree();
         tree.getRoots().add(grandparent);
 
-        boolean[] mask = GatingEngine.computeAncestorMask(tree, grandchild, index, stats, false, null);
+        boolean[] mask = GatingEngine.computeAncestorMask(tree, grandchild, index, stats, null);
         assertFalse(mask[0], "CD45=1 -> excluded at grandparent");
         assertFalse(mask[1], "CD45=2 -> excluded at grandparent");
         assertFalse(mask[2], "CD45=3, CD3=30 -> excluded at parent (CD3 < 35)");
@@ -533,7 +533,7 @@ class GatingEngineTest {
         GateTree tree = new GateTree();
         tree.getRoots().add(parent);
 
-        boolean[] mask = GatingEngine.computeAncestorMask(tree, child, index, stats, false, null);
+        boolean[] mask = GatingEngine.computeAncestorMask(tree, child, index, stats, null);
         // Disabled parent should not filter — all cells reach the child
         for (int i = 0; i < 5; i++) {
             assertTrue(mask[i], "Cell " + i + " should reach child (parent disabled)");

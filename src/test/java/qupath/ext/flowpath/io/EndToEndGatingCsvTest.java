@@ -89,8 +89,8 @@ class EndToEndGatingCsvTest {
 
     /** Run the full pipeline: engine + CSV export, return parsed rows (excluding header). */
     private CsvResult runPipeline(GateTree tree, CellIndex index, MarkerStats stats,
-                                  boolean useZScore, String filename) throws IOException {
-        AssignmentResult result = GatingEngine.assignAll(tree, index, stats, useZScore);
+                                  String filename) throws IOException {
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
         File csvFile = tempDir.resolve(filename).toFile();
         PhenotypeCsvExporter.export(csvFile, index, result, tree, stats);
 
@@ -129,7 +129,7 @@ class EndToEndGatingCsvTest {
         tree.setQualityFilter(null);
         tree.addRoot(gate);
 
-        CsvResult csv = runPipeline(tree, index, stats, false, "threshold.csv");
+        CsvResult csv = runPipeline(tree, index, stats, "threshold.csv");
         assertEquals(6, csv.rows.size());
 
         assertEquals("CD45-", csv.cellValue(0, "phenotype"));
@@ -170,7 +170,7 @@ class EndToEndGatingCsvTest {
         tree.setQualityFilter(null);
         tree.addRoot(root);
 
-        CsvResult csv = runPipeline(tree, index, stats, false, "nested.csv");
+        CsvResult csv = runPipeline(tree, index, stats, "nested.csv");
         assertEquals(4, csv.rows.size());
 
         assertEquals("CD45-", csv.cellValue(0, "phenotype"));
@@ -211,7 +211,7 @@ class EndToEndGatingCsvTest {
         tree.setQualityFilter(null);
         tree.addRoot(gate);
 
-        CsvResult csv = runPipeline(tree, index, stats, false, "quadrant.csv");
+        CsvResult csv = runPipeline(tree, index, stats, "quadrant.csv");
         assertEquals(4, csv.rows.size());
 
         // Verify each cell lands in the correct quadrant
@@ -252,7 +252,7 @@ class EndToEndGatingCsvTest {
         tree.setQualityFilter(null);
         tree.addRoot(gate);
 
-        CsvResult csv = runPipeline(tree, index, stats, false, "polygon.csv");
+        CsvResult csv = runPipeline(tree, index, stats, "polygon.csv");
         assertEquals(2, csv.rows.size());
 
         String inside = csv.cellValue(0, "phenotype");
@@ -279,7 +279,7 @@ class EndToEndGatingCsvTest {
         tree.setQualityFilter(null);
         tree.addRoot(gate);
 
-        CsvResult csv = runPipeline(tree, index, stats, false, "rectangle.csv");
+        CsvResult csv = runPipeline(tree, index, stats, "rectangle.csv");
         assertEquals(3, csv.rows.size());
 
         String p0 = csv.cellValue(0, "phenotype");
@@ -307,7 +307,7 @@ class EndToEndGatingCsvTest {
         tree.setQualityFilter(null);
         tree.addRoot(gate);
 
-        CsvResult csv = runPipeline(tree, index, stats, false, "ellipse.csv");
+        CsvResult csv = runPipeline(tree, index, stats, "ellipse.csv");
         assertEquals(3, csv.rows.size());
 
         String inside1 = csv.cellValue(0, "phenotype");
@@ -335,7 +335,7 @@ class EndToEndGatingCsvTest {
         tree.setQualityFilter(null);
         tree.addRoot(gate);
 
-        CsvResult csv = runPipeline(tree, index, stats, false, "disabled.csv");
+        CsvResult csv = runPipeline(tree, index, stats, "disabled.csv");
         assertEquals(2, csv.rows.size());
 
         // Both cells should be Unclassified since the only gate is disabled
@@ -369,7 +369,7 @@ class EndToEndGatingCsvTest {
         tree.addRoot(gate1);
         tree.addRoot(gate2);
 
-        CsvResult csv = runPipeline(tree, index, stats, false, "mixed.csv");
+        CsvResult csv = runPipeline(tree, index, stats, "mixed.csv");
         assertEquals(2, csv.rows.size());
 
         // CD45 gate runs, CD3 gate is skipped
@@ -403,7 +403,7 @@ class EndToEndGatingCsvTest {
         tree.setQualityFilter(qf);
         tree.addRoot(gate);
 
-        CsvResult csv = runPipeline(tree, index, stats, false, "qf_threshold.csv");
+        CsvResult csv = runPipeline(tree, index, stats, "qf_threshold.csv");
 
         // Cell 0 excluded by QF, so only 3 rows in CSV
         assertEquals(3, csv.rows.size());
@@ -441,7 +441,7 @@ class EndToEndGatingCsvTest {
         tree.setQualityFilter(null);
         tree.addRoot(root);
 
-        CsvResult csv = runPipeline(tree, index, stats, false, "three_level.csv");
+        CsvResult csv = runPipeline(tree, index, stats, "three_level.csv");
         assertEquals(4, csv.rows.size());
 
         assertEquals("CD45-", csv.cellValue(0, "phenotype"));
@@ -494,7 +494,7 @@ class EndToEndGatingCsvTest {
         tree.setQualityFilter(null);
         tree.addRoot(qgate);
 
-        CsvResult csv = runPipeline(tree, index, stats, false, "quadrant_nested.csv");
+        CsvResult csv = runPipeline(tree, index, stats, "quadrant_nested.csv");
         assertEquals(3, csv.rows.size());
 
         // Cell 0: Q1 -> CD8+ (value=6 >= 4)
@@ -552,7 +552,7 @@ class EndToEndGatingCsvTest {
         tree.setQualityFilter(null);
         tree.addRoot(root);
 
-        CsvResult csv = runPipeline(tree, index, stats, false, "complex.csv");
+        CsvResult csv = runPipeline(tree, index, stats, "complex.csv");
         assertEquals(5, csv.rows.size());
 
         assertEquals("CD45-", csv.cellValue(0, "phenotype"));

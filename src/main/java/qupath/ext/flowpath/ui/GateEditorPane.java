@@ -94,9 +94,88 @@ public class GateEditorPane extends VBox {
         zscoreModeBtn.setTooltip(new Tooltip("Compare z-score normalized values against threshold (recommended)"));
         modeGroup.selectedToggleProperty().addListener((obs, old, val) -> {
             if (!suppressEvents && currentNode != null) {
-                currentNode.setThresholdIsZScore(zscoreModeBtn.isSelected());
+                boolean toZScore = zscoreModeBtn.isSelected();
+                currentNode.setThresholdIsZScore(toZScore);
                 if (isThresholdGate(currentNode)) {
+                    // Transform threshold value between coordinate spaces
+                    if (markerStats != null && currentNode.getChannel() != null
+                            && markerStats.getStd(currentNode.getChannel()) > 1e-10) {
+                        double oldVal = currentNode.getThreshold();
+                        currentNode.setThreshold(toZScore
+                                ? markerStats.toZScore(currentNode.getChannel(), oldVal)
+                                : markerStats.fromZScore(currentNode.getChannel(), oldVal));
+                    }
                     updateHistogram();
+                } else if (currentNode instanceof QuadrantGate qg) {
+                    // Transform quadrant thresholds between coordinate spaces
+                    if (markerStats != null && qg.getChannelX() != null && qg.getChannelY() != null
+                            && markerStats.getStd(qg.getChannelX()) > 1e-10
+                            && markerStats.getStd(qg.getChannelY()) > 1e-10) {
+                        if (toZScore) {
+                            qg.setThresholdX(markerStats.toZScore(qg.getChannelX(), qg.getThresholdX()));
+                            qg.setThresholdY(markerStats.toZScore(qg.getChannelY(), qg.getThresholdY()));
+                        } else {
+                            qg.setThresholdX(markerStats.fromZScore(qg.getChannelX(), qg.getThresholdX()));
+                            qg.setThresholdY(markerStats.fromZScore(qg.getChannelY(), qg.getThresholdY()));
+                        }
+                    }
+                    fireNodeChanged();
+                    Platform.runLater(() -> setGateNode(currentNode));
+                    return;
+                } else if (currentNode instanceof PolygonGate
+                        || currentNode instanceof RectangleGate
+                        || currentNode instanceof EllipseGate) {
+                    // Transform shape coordinates between raw and z-score space
+                    String chX = get2DChannelX(currentNode);
+                    String chY = get2DChannelY(currentNode);
+                    if (markerStats != null && chX != null && chY != null
+                            && markerStats.getStd(chX) > 1e-10 && markerStats.getStd(chY) > 1e-10) {
+                        if (currentNode instanceof PolygonGate pg && !pg.getVertices().isEmpty()) {
+                            List<double[]> transformed = new ArrayList<>();
+                            for (double[] v : pg.getVertices()) {
+                                transformed.add(new double[]{
+                                        toZScore ? markerStats.toZScore(chX, v[0]) : markerStats.fromZScore(chX, v[0]),
+                                        toZScore ? markerStats.toZScore(chY, v[1]) : markerStats.fromZScore(chY, v[1])
+                                });
+                            }
+                            pg.setVertices(transformed);
+                        } else if (currentNode instanceof RectangleGate rg
+                                && rg.getMaxX() - rg.getMinX() > 1e-10) {
+                            if (toZScore) {
+                                rg.setMinX(markerStats.toZScore(chX, rg.getMinX()));
+                                rg.setMaxX(markerStats.toZScore(chX, rg.getMaxX()));
+                                rg.setMinY(markerStats.toZScore(chY, rg.getMinY()));
+                                rg.setMaxY(markerStats.toZScore(chY, rg.getMaxY()));
+                            } else {
+                                rg.setMinX(markerStats.fromZScore(chX, rg.getMinX()));
+                                rg.setMaxX(markerStats.fromZScore(chX, rg.getMaxX()));
+                                rg.setMinY(markerStats.fromZScore(chY, rg.getMinY()));
+                                rg.setMaxY(markerStats.fromZScore(chY, rg.getMaxY()));
+                            }
+                        } else if (currentNode instanceof EllipseGate eg && eg.getRadiusX() > 1e-10) {
+                            double stdX = markerStats.getStd(chX);
+                            double stdY = markerStats.getStd(chY);
+                            if (toZScore) {
+                                eg.setCenterX(markerStats.toZScore(chX, eg.getCenterX()));
+                                eg.setCenterY(markerStats.toZScore(chY, eg.getCenterY()));
+                                eg.setRadiusX(eg.getRadiusX() / stdX);
+                                eg.setRadiusY(eg.getRadiusY() / stdY);
+                            } else {
+                                eg.setCenterX(markerStats.fromZScore(chX, eg.getCenterX()));
+                                eg.setCenterY(markerStats.fromZScore(chY, eg.getCenterY()));
+                                eg.setRadiusX(eg.getRadiusX() * stdX);
+                                eg.setRadiusY(eg.getRadiusY() * stdY);
+                            }
+                        }
+                    } else {
+                        // Can't transform — clear shape as fallback
+                        if (currentNode instanceof PolygonGate pg) pg.setVertices(List.of());
+                        else if (currentNode instanceof RectangleGate rg) { rg.setMinX(0); rg.setMaxX(0); rg.setMinY(0); rg.setMaxY(0); }
+                        else if (currentNode instanceof EllipseGate eg) { eg.setCenterX(0); eg.setCenterY(0); eg.setRadiusX(0); eg.setRadiusY(0); }
+                    }
+                    fireNodeChanged();
+                    Platform.runLater(() -> setGateNode(currentNode));
+                    return;
                 }
                 fireNodeChanged();
             }
@@ -152,7 +231,10 @@ public class GateEditorPane extends VBox {
                 if (currentScatter != null && markerStats != null) {
                     String cx = get2DChannelX(currentNode);
                     String cy = get2DChannelY(currentNode);
-                    if (cx != null && cy != null) applyClipAxisRange(currentScatter, cx, cy, currentNode);
+                    if (cx != null && cy != null) {
+                        if (currentNode.isThresholdIsZScore()) applyClipAxisRangeZScore(currentScatter, cx, cy, currentNode);
+                        else applyClipAxisRange(currentScatter, cx, cy, currentNode);
+                    }
                 }
                 fireNodeChanged();
             }
@@ -166,7 +248,10 @@ public class GateEditorPane extends VBox {
                 if (currentScatter != null && markerStats != null) {
                     String cx = get2DChannelX(currentNode);
                     String cy = get2DChannelY(currentNode);
-                    if (cx != null && cy != null) applyClipAxisRange(currentScatter, cx, cy, currentNode);
+                    if (cx != null && cy != null) {
+                        if (currentNode.isThresholdIsZScore()) applyClipAxisRangeZScore(currentScatter, cx, cy, currentNode);
+                        else applyClipAxisRange(currentScatter, cx, cy, currentNode);
+                    }
                 }
                 fireNodeChanged();
             }
@@ -332,21 +417,63 @@ public class GateEditorPane extends VBox {
         ComboBox<String> chXCombo = new ComboBox<>(channelCombo.getItems());
         chXCombo.setValue(gate.getChannelX());
         chXCombo.setPrefWidth(150);
-        chXCombo.setOnAction(e -> { if (!suppressEvents) { gate.setChannelX(chXCombo.getValue()); fireNodeChanged(); }});
+        chXCombo.setOnAction(e -> { if (!suppressEvents) {
+            String oldX = gate.getChannelX(); String newX = chXCombo.getValue();
+            gate.setChannelX(newX);
+            if (oldX != null && newX != null) {
+                for (Branch b : gate.getBranches()) {
+                    b.setName(b.getName().replace(oldX + "+", newX + "+").replace(oldX + "-", newX + "-"));
+                }
+                buildBranchNamesEditor(gate);
+            }
+            fireNodeChanged();
+        }});
 
         Label chYLabel = new Label("Channel Y:");
         chYLabel.setStyle("-fx-text-fill: white;");
         ComboBox<String> chYCombo = new ComboBox<>(channelCombo.getItems());
         chYCombo.setValue(gate.getChannelY());
         chYCombo.setPrefWidth(150);
-        chYCombo.setOnAction(e -> { if (!suppressEvents) { gate.setChannelY(chYCombo.getValue()); fireNodeChanged(); }});
+        chYCombo.setOnAction(e -> { if (!suppressEvents) {
+            String oldY = gate.getChannelY(); String newY = chYCombo.getValue();
+            gate.setChannelY(newY);
+            if (oldY != null && newY != null) {
+                for (Branch b : gate.getBranches()) {
+                    b.setName(b.getName().replace(oldY + "+", newY + "+").replace(oldY + "-", newY + "-"));
+                }
+                buildBranchNamesEditor(gate);
+            }
+            fireNodeChanged();
+        }});
 
-        Slider sliderX = new Slider(-5, 5, gate.getThresholdX());
+        // Compute slider ranges from data (z-score or raw)
+        double sliderMinX = -5, sliderMaxX = 5, sliderMinY = -5, sliderMaxY = 5;
+        if (markerStats != null && cellIndex != null && gate.getChannelX() != null && gate.getChannelY() != null) {
+            double pLoX = markerStats.getPercentileValue(gate.getChannelX(), gate.getClipPercentileLow());
+            double pHiX = markerStats.getPercentileValue(gate.getChannelX(), gate.getClipPercentileHigh());
+            double pLoY = markerStats.getPercentileValue(gate.getChannelY(), gate.getClipPercentileLow());
+            double pHiY = markerStats.getPercentileValue(gate.getChannelY(), gate.getClipPercentileHigh());
+            if (!Double.isNaN(pLoX) && !Double.isNaN(pHiX) && !Double.isNaN(pLoY) && !Double.isNaN(pHiY)) {
+                if (gate.isThresholdIsZScore()) {
+                    sliderMinX = markerStats.toZScore(gate.getChannelX(), pLoX);
+                    sliderMaxX = markerStats.toZScore(gate.getChannelX(), pHiX);
+                    sliderMinY = markerStats.toZScore(gate.getChannelY(), pLoY);
+                    sliderMaxY = markerStats.toZScore(gate.getChannelY(), pHiY);
+                } else {
+                    sliderMinX = pLoX; sliderMaxX = pHiX;
+                    sliderMinY = pLoY; sliderMaxY = pHiY;
+                }
+            }
+        }
+        if (sliderMinX >= sliderMaxX) { sliderMinX = -5; sliderMaxX = 5; }
+        if (sliderMinY >= sliderMaxY) { sliderMinY = -5; sliderMaxY = 5; }
+
+        Slider sliderX = new Slider(sliderMinX, sliderMaxX, Math.max(sliderMinX, Math.min(sliderMaxX, gate.getThresholdX())));
         sliderX.setBlockIncrement(0.01);
         Label valX = new Label(String.format("%.3f", gate.getThresholdX()));
         valX.setStyle("-fx-text-fill: white; -fx-font-family: monospace;");
 
-        Slider sliderY = new Slider(-5, 5, gate.getThresholdY());
+        Slider sliderY = new Slider(sliderMinY, sliderMaxY, Math.max(sliderMinY, Math.min(sliderMaxY, gate.getThresholdY())));
         sliderY.setBlockIncrement(0.01);
         Label valY = new Label(String.format("%.3f", gate.getThresholdY()));
         valY.setStyle("-fx-text-fill: white; -fx-font-family: monospace;");
@@ -387,12 +514,22 @@ public class GateEditorPane extends VBox {
             int mxIdx = cellIndex.getMarkerIndex(gate.getChannelX());
             int myIdx = cellIndex.getMarkerIndex(gate.getChannelY());
             if (mxIdx >= 0 && myIdx >= 0) {
-                double[][] filtered = getFilteredXY(mxIdx, myIdx);
+                // Transform data to z-score space when thresholds are z-score based
+                double[][] filtered;
+                if (gate.isThresholdIsZScore() && markerStats != null) {
+                    filtered = getFilteredXYWithZScore(mxIdx, myIdx, gate.getChannelX(), gate.getChannelY());
+                } else {
+                    filtered = getFilteredXY(mxIdx, myIdx);
+                }
                 ScatterPlotCanvas scatter = new ScatterPlotCanvas();
                 scatter.setData(filtered[0], filtered[1], gate.getChannelX(), gate.getChannelY());
                 scatter.setCrosshairOverlay(gate.getThresholdX(), gate.getThresholdY());
                 if (markerStats != null) {
-                    applyClipAxisRange(scatter, gate.getChannelX(), gate.getChannelY(), gate);
+                    if (gate.isThresholdIsZScore()) {
+                        applyClipAxisRangeZScore(scatter, gate.getChannelX(), gate.getChannelY(), gate);
+                    } else {
+                        applyClipAxisRange(scatter, gate.getChannelX(), gate.getChannelY(), gate);
+                    }
                 }
                 applyBranchColorsToScatter(scatter, gate);
                 scatterRef[0] = scatter;
@@ -404,12 +541,37 @@ public class GateEditorPane extends VBox {
                     int mx = cellIndex.getMarkerIndex(gate.getChannelX());
                     int my = cellIndex.getMarkerIndex(gate.getChannelY());
                     if (mx >= 0 && my >= 0) {
-                        double[][] f = getFilteredXY(mx, my);
+                        double[][] f;
+                        if (gate.isThresholdIsZScore() && markerStats != null) {
+                            f = getFilteredXYWithZScore(mx, my, gate.getChannelX(), gate.getChannelY());
+                        } else {
+                            f = getFilteredXY(mx, my);
+                        }
                         scatter.setData(f[0], f[1], gate.getChannelX(), gate.getChannelY());
                     }
                 };
-                chXCombo.setOnAction(e -> { if (!suppressEvents) { gate.setChannelX(chXCombo.getValue()); refreshScatter.run(); fireNodeChanged(); }});
-                chYCombo.setOnAction(e -> { if (!suppressEvents) { gate.setChannelY(chYCombo.getValue()); refreshScatter.run(); fireNodeChanged(); }});
+                chXCombo.setOnAction(e -> { if (!suppressEvents) {
+                    String oldX = gate.getChannelX(); String newX = chXCombo.getValue();
+                    gate.setChannelX(newX);
+                    if (oldX != null && newX != null) {
+                        for (Branch b : gate.getBranches()) {
+                            b.setName(b.getName().replace(oldX + "+", newX + "+").replace(oldX + "-", newX + "-"));
+                        }
+                        buildBranchNamesEditor(gate);
+                    }
+                    refreshScatter.run(); fireNodeChanged();
+                }});
+                chYCombo.setOnAction(e -> { if (!suppressEvents) {
+                    String oldY = gate.getChannelY(); String newY = chYCombo.getValue();
+                    gate.setChannelY(newY);
+                    if (oldY != null && newY != null) {
+                        for (Branch b : gate.getBranches()) {
+                            b.setName(b.getName().replace(oldY + "+", newY + "+").replace(oldY + "-", newY + "-"));
+                        }
+                        buildBranchNamesEditor(gate);
+                    }
+                    refreshScatter.run(); fireNodeChanged();
+                }});
             }
         }
     }
@@ -457,8 +619,13 @@ public class GateEditorPane extends VBox {
         else if (node instanceof RectangleGate) rectBtn.setSelected(true);
         else if (node instanceof EllipseGate) ellipseBtn.setSelected(true);
 
+        HBox modeRow = new HBox(12, new Label("Mode:") {{ setStyle("-fx-text-fill: white;"); }}, rawModeBtn, zscoreModeBtn);
+        if (node.isThresholdIsZScore()) zscoreModeBtn.setSelected(true);
+        else rawModeBtn.setSelected(true);
+
         gateSpecificArea.getChildren().addAll(
             new HBox(8, chXLabel, chXCombo), new HBox(8, chYLabel, chYCombo),
+            modeRow,
             createSectionHeader("Shape"), drawToolbar
         );
 
@@ -470,10 +637,20 @@ public class GateEditorPane extends VBox {
             int myIdx = cellIndex.getMarkerIndex(chY);
             if (mxIdx >= 0 && myIdx >= 0) {
                 ScatterPlotCanvas scatter = new ScatterPlotCanvas();
-                double[][] filtered = getFilteredXY(mxIdx, myIdx);
+                // Transform data to z-score space when z-score mode is active
+                double[][] filtered;
+                if (node.isThresholdIsZScore() && markerStats != null) {
+                    filtered = getFilteredXYWithZScore(mxIdx, myIdx, chX, chY);
+                } else {
+                    filtered = getFilteredXY(mxIdx, myIdx);
+                }
                 scatter.setData(filtered[0], filtered[1], chX, chY);
                 if (markerStats != null) {
-                    applyClipAxisRange(scatter, chX, chY, node);
+                    if (node.isThresholdIsZScore()) {
+                        applyClipAxisRangeZScore(scatter, chX, chY, node);
+                    } else {
+                        applyClipAxisRange(scatter, chX, chY, node);
+                    }
                 }
                 this.currentScatter = scatter;
 
@@ -580,7 +757,12 @@ public class GateEditorPane extends VBox {
                     else if (node instanceof EllipseGate eg2) { eg2.setChannelX(cx); eg2.setChannelY(cy); }
                     int mx = cellIndex.getMarkerIndex(cx), my = cellIndex.getMarkerIndex(cy);
                     if (mx >= 0 && my >= 0) {
-                        double[][] f = getFilteredXY(mx, my);
+                        double[][] f;
+                        if (node.isThresholdIsZScore() && markerStats != null) {
+                            f = getFilteredXYWithZScore(mx, my, cx, cy);
+                        } else {
+                            f = getFilteredXY(mx, my);
+                        }
                         scatter.setData(f[0], f[1], cx, cy);
                     }
                     fireNodeChanged();
@@ -634,9 +816,9 @@ public class GateEditorPane extends VBox {
                     }
                 }
             });
-            nameField.setOnAction(e -> fireNodeChanged());
+            nameField.setOnAction(e -> { fireNodeChanged(); buildActionButtons(currentNode); });
             nameField.focusedProperty().addListener((obs, old, focused) -> {
-                if (!focused) fireNodeChanged();
+                if (!focused) { fireNodeChanged(); buildActionButtons(currentNode); }
             });
 
             ColorPicker colorPicker = new ColorPicker(ColorUtils.intToColor(branch.getColor()));
@@ -785,6 +967,24 @@ public class GateEditorPane extends VBox {
         return new double[][]{fx, fy};
     }
 
+    /**
+     * Like getFilteredXY but transforms values to z-score space.
+     * Used for quadrant gate scatter plots where thresholds are in z-score space.
+     */
+    private double[][] getFilteredXYWithZScore(int mxIdx, int myIdx, String chX, String chY) {
+        double[][] raw = getFilteredXY(mxIdx, myIdx);
+        if (markerStats == null) return raw;
+        double[] fx = raw[0];
+        double[] fy = raw[1];
+        double[] zx = new double[fx.length];
+        double[] zy = new double[fy.length];
+        for (int i = 0; i < fx.length; i++) {
+            zx[i] = markerStats.toZScore(chX, fx[i]);
+            zy[i] = markerStats.toZScore(chY, fy[i]);
+        }
+        return new double[][]{zx, zy};
+    }
+
     /** Check if a cell index passes both ROI mask and ancestor mask. */
     private boolean passesMasks(int i) {
         if (roiMask != null && !roiMask[i]) return false;
@@ -890,6 +1090,19 @@ public class GateEditorPane extends VBox {
         return header;
     }
 
+    private void applyClipAxisRangeZScore(ScatterPlotCanvas scatter, String chX, String chY, GateNode node) {
+        if (markerStats == null) { scatter.clearAxisRange(); return; }
+        double loX = markerStats.toZScore(chX, markerStats.getPercentileValue(chX, node.getClipPercentileLow()));
+        double hiX = markerStats.toZScore(chX, markerStats.getPercentileValue(chX, node.getClipPercentileHigh()));
+        double loY = markerStats.toZScore(chY, markerStats.getPercentileValue(chY, node.getClipPercentileLow()));
+        double hiY = markerStats.toZScore(chY, markerStats.getPercentileValue(chY, node.getClipPercentileHigh()));
+        if (Double.isNaN(loX) || Double.isNaN(hiX) || Double.isNaN(loY) || Double.isNaN(hiY)) {
+            scatter.clearAxisRange();
+            return;
+        }
+        scatter.setAxisRange(loX, hiX, loY, hiY);
+    }
+
     private void applyClipAxisRange(ScatterPlotCanvas scatter, String chX, String chY, GateNode node) {
         if (markerStats == null) {
             scatter.clearAxisRange();
@@ -899,6 +1112,10 @@ public class GateEditorPane extends VBox {
         double hiX = markerStats.getPercentileValue(chX, node.getClipPercentileHigh());
         double loY = markerStats.getPercentileValue(chY, node.getClipPercentileLow());
         double hiY = markerStats.getPercentileValue(chY, node.getClipPercentileHigh());
+        if (Double.isNaN(loX) || Double.isNaN(hiX) || Double.isNaN(loY) || Double.isNaN(hiY)) {
+            scatter.clearAxisRange();
+            return;
+        }
         scatter.setAxisRange(loX, hiX, loY, hiY);
     }
 
@@ -910,10 +1127,20 @@ public class GateEditorPane extends VBox {
         int mxIdx = cellIndex.getMarkerIndex(chX);
         int myIdx = cellIndex.getMarkerIndex(chY);
         if (mxIdx < 0 || myIdx < 0) return;
-        double[][] filtered = getFilteredXY(mxIdx, myIdx);
+        // All 2D gate types (quadrant, polygon, rectangle, ellipse) use per-gate z-score flag
+        double[][] filtered;
+        if (currentNode.isThresholdIsZScore() && markerStats != null) {
+            filtered = getFilteredXYWithZScore(mxIdx, myIdx, chX, chY);
+        } else {
+            filtered = getFilteredXY(mxIdx, myIdx);
+        }
         currentScatter.setData(filtered[0], filtered[1], chX, chY);
         if (markerStats != null) {
-            applyClipAxisRange(currentScatter, chX, chY, currentNode);
+            if (currentNode.isThresholdIsZScore()) {
+                applyClipAxisRangeZScore(currentScatter, chX, chY, currentNode);
+            } else {
+                applyClipAxisRange(currentScatter, chX, chY, currentNode);
+            }
         }
     }
 

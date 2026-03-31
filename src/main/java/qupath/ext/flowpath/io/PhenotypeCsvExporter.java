@@ -158,6 +158,7 @@ public class PhenotypeCsvExporter {
     private static void traceMarkerSigns(GateNode node,
                                          Map<String, String> currentSigns,
                                          Map<String, Map<String, String>> result) {
+        if (!node.isEnabled()) return;
         List<Branch> branches = node.getBranches();
         List<String> channels = node.getChannels();
 

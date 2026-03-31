@@ -128,17 +128,19 @@ public class CellIndex {
         Number val = measurements.get(key);
         if (val != null) return val.doubleValue();
 
-        // Layer-prefixed match: "[layer] key"
-        String suffix = "] " + key;
+        // Layer-prefixed match: "[layer] key" (case-insensitive)
+        String suffixLower = ("] " + key).toLowerCase();
         for (Map.Entry<String, Number> entry : measurements.entrySet()) {
-            if (entry.getKey().endsWith(suffix) && entry.getValue() != null) {
+            if (entry.getKey().toLowerCase().endsWith(suffixLower) && entry.getValue() != null) {
                 return entry.getValue().doubleValue();
             }
         }
 
-        // Prefix match: "area" matches "area µm²"
+        // Prefix match: "area" matches "Area µm²" (case-insensitive, underscores treated as spaces)
+        String keyLower = key.toLowerCase().replace('_', ' ');
         for (Map.Entry<String, Number> entry : measurements.entrySet()) {
-            if (entry.getKey().startsWith(key) && entry.getValue() != null) {
+            String entryLower = entry.getKey().toLowerCase().replace('_', ' ');
+            if (entryLower.startsWith(keyLower) && entry.getValue() != null) {
                 return entry.getValue().doubleValue();
             }
         }

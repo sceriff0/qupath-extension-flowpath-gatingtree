@@ -33,18 +33,17 @@ public class LivePreviewService {
     private volatile GateTree gateTree;
     private volatile CellIndex cellIndex;
     private volatile MarkerStats markerStats;
-    private volatile boolean useZScore;
     private volatile ImageData<?> imageData;
     private volatile boolean[] roiMask;
 
     /** Optional callback fired after MarkerStats is recomputed (e.g., to refresh UI sliders). */
-    private Runnable onStatsRecomputed;
+    private volatile Runnable onStatsRecomputed;
 
     /** Optional callback fired when gating computation starts (e.g., to show a spinner). */
-    private Runnable onUpdateStarted;
+    private volatile Runnable onUpdateStarted;
 
     /** Optional callback fired after cell classifications are applied (e.g., to refresh tree counts). */
-    private Runnable onUpdateComplete;
+    private volatile Runnable onUpdateComplete;
 
     /** Count of excluded cells from the most recent gating run (updated on FX thread). */
     private int lastExcludedCount;
@@ -54,7 +53,7 @@ public class LivePreviewService {
      * Listeners can check {@link #isFiringHierarchyEvent()} to avoid reacting to
      * events that originated from our own gating update.
      */
-    private boolean firingHierarchyEvent;
+    private volatile boolean firingHierarchyEvent;
 
     public LivePreviewService() {
         this.executor = Executors.newSingleThreadExecutor(r -> {
@@ -82,10 +81,6 @@ public class LivePreviewService {
 
     public MarkerStats getMarkerStats() {
         return this.markerStats;
-    }
-
-    public void setUseZScore(boolean useZScore) {
-        this.useZScore = useZScore;
     }
 
     public void setImageData(ImageData<?> imageData) {
@@ -144,13 +139,13 @@ public class LivePreviewService {
         if (cellIndex == null || gateTree == null || executor.isShutdown()) {
             return;
         }
-        final boolean[] roi = this.roiMask;
+        final boolean[] roi = this.roiMask != null ? this.roiMask.clone() : null;
         final CellIndex idx = this.cellIndex;
         final QualityFilter qf = gateTree.getQualityFilter().deepCopy();
         executor.submit(() -> {
             boolean[] qualityMask = GatingEngine.computeQualityMask(idx, qf);
             boolean[] mask = roi != null ? GatingEngine.combineMasks(qualityMask, roi) : qualityMask;
-            MarkerStats recomputed = MarkerStats.compute(cellIndex, mask);
+            MarkerStats recomputed = MarkerStats.compute(idx, mask);
             this.markerStats = recomputed;
             if (onStatsRecomputed != null) {
                 Platform.runLater(onStatsRecomputed);
@@ -176,7 +171,6 @@ public class LivePreviewService {
         final GateTree originalTree = this.gateTree;
         final CellIndex index = this.cellIndex;
         final MarkerStats stats = this.markerStats;
-        final boolean zScore = this.useZScore;
         final ImageData<?> data = this.imageData;
         final boolean[] roi = this.roiMask;
 
@@ -192,7 +186,7 @@ public class LivePreviewService {
         }
 
         executor.submit(() -> {
-            GatingEngine.AssignmentResult result = GatingEngine.assignAll(tree, index, stats, zScore, roi);
+            GatingEngine.AssignmentResult result = GatingEngine.assignAll(tree, index, stats, roi);
 
             Platform.runLater(() -> {
                 // Transfer counts from the snapshot back to the live tree for UI display

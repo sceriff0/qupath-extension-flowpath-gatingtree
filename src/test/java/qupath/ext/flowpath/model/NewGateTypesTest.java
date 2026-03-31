@@ -92,7 +92,7 @@ class NewGateTypesTest {
         // default QualityFilter (passes all)
         tree.addRoot(gate);
 
-        AssignmentResult result = GatingEngine.assignAll(tree, index, stats, false);
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
         String[] phenotypes = result.getPhenotypes();
 
         // Cells 0,1: CD45 < 5, CD3 < 5 -> NN
@@ -274,7 +274,7 @@ class NewGateTypesTest {
         // default QualityFilter (passes all)
         tree.addRoot(gate);
 
-        AssignmentResult result = GatingEngine.assignAll(tree, index, stats, false);
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
         String[] phenotypes = result.getPhenotypes();
 
         // Cell 0: (5,5) -> inside

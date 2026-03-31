@@ -175,6 +175,7 @@ public class FlowPathSerializer {
         if (node instanceof PolygonGate pg) {
             obj.addProperty("channelX", pg.getChannelX());
             obj.addProperty("channelY", pg.getChannelY());
+            obj.addProperty("thresholdIsZScore", pg.isThresholdIsZScore());
             JsonArray verts = new JsonArray();
             for (double[] v : pg.getVertices()) {
                 JsonArray pt = new JsonArray();
@@ -186,6 +187,7 @@ public class FlowPathSerializer {
         } else if (node instanceof RectangleGate rg) {
             obj.addProperty("channelX", rg.getChannelX());
             obj.addProperty("channelY", rg.getChannelY());
+            obj.addProperty("thresholdIsZScore", rg.isThresholdIsZScore());
             obj.addProperty("minX", rg.getMinX());
             obj.addProperty("maxX", rg.getMaxX());
             obj.addProperty("minY", rg.getMinY());
@@ -194,6 +196,7 @@ public class FlowPathSerializer {
         } else if (node instanceof EllipseGate eg) {
             obj.addProperty("channelX", eg.getChannelX());
             obj.addProperty("channelY", eg.getChannelY());
+            obj.addProperty("thresholdIsZScore", eg.isThresholdIsZScore());
             obj.addProperty("centerX", eg.getCenterX());
             obj.addProperty("centerY", eg.getCenterY());
             obj.addProperty("radiusX", eg.getRadiusX());
@@ -231,7 +234,7 @@ public class FlowPathSerializer {
         return obj;
     }
 
-    private static List<GateNode> deserializeNodeList(JsonArray array) {
+    private static List<GateNode> deserializeNodeList(JsonArray array) throws IOException {
         List<GateNode> nodes = new ArrayList<>();
         for (JsonElement elem : array) {
             nodes.add(deserializeNode(elem.getAsJsonObject()));
@@ -239,7 +242,7 @@ public class FlowPathSerializer {
         return nodes;
     }
 
-    private static GateNode deserializeNode(JsonObject obj) {
+    private static GateNode deserializeNode(JsonObject obj) throws IOException {
         String type = obj.has("type") ? obj.get("type").getAsString() : "threshold";
 
         // Shared fields
@@ -261,15 +264,18 @@ public class FlowPathSerializer {
             result = deserialize2DNode(new RectangleGate(), obj, clipLow, clipHigh, excludeOutliers);
         } else if ("ellipse".equals(type)) {
             result = deserialize2DNode(new EllipseGate(), obj, clipLow, clipHigh, excludeOutliers);
-        } else {
+        } else if ("threshold".equals(type)) {
             result = deserializeThresholdNode(obj, clipLow, clipHigh, excludeOutliers);
+        } else {
+            throw new IOException("Unknown gate type: \"" + type + "\". "
+                    + "This file may have been created by a newer version of FlowPath.");
         }
         result.setEnabled(enabled);
         return result;
     }
 
     private static GateNode deserializeThresholdNode(JsonObject obj,
-                                                      double clipLow, double clipHigh, boolean excludeOutliers) {
+                                                      double clipLow, double clipHigh, boolean excludeOutliers) throws IOException {
         GateNode node = new GateNode();
         node.setClipPercentileLow(clipLow);
         node.setClipPercentileHigh(clipHigh);
@@ -298,7 +304,7 @@ public class FlowPathSerializer {
     }
 
     private static QuadrantGate deserializeQuadrantNode(JsonObject obj,
-                                                         double clipLow, double clipHigh, boolean excludeOutliers) {
+                                                         double clipLow, double clipHigh, boolean excludeOutliers) throws IOException {
         QuadrantGate gate = new QuadrantGate();
         gate.setClipPercentileLow(clipLow);
         gate.setClipPercentileHigh(clipHigh);
@@ -331,13 +337,17 @@ public class FlowPathSerializer {
     }
 
     private static GateNode deserialize2DNode(GateNode gate, JsonObject obj,
-                                                double clipLow, double clipHigh, boolean excludeOutliers) {
+                                                double clipLow, double clipHigh, boolean excludeOutliers) throws IOException {
         gate.setClipPercentileLow(clipLow);
         gate.setClipPercentileHigh(clipHigh);
         gate.setExcludeOutliers(excludeOutliers);
 
         String chX = obj.has("channelX") ? obj.get("channelX").getAsString() : null;
         String chY = obj.has("channelY") ? obj.get("channelY").getAsString() : null;
+
+        // Shared: z-score flag for all 2D gate types
+        if (obj.has("thresholdIsZScore"))
+            gate.setThresholdIsZScore(obj.get("thresholdIsZScore").getAsBoolean());
 
         if (gate instanceof PolygonGate pg) {
             pg.setChannelX(chX); pg.setChannelY(chY);

@@ -159,6 +159,7 @@ public class GateNode {
         target.clipPercentileLow = this.clipPercentileLow;
         target.clipPercentileHigh = this.clipPercentileHigh;
         target.excludeOutliers = this.excludeOutliers;
+        target.thresholdIsZScore = this.thresholdIsZScore;
     }
 
     /**

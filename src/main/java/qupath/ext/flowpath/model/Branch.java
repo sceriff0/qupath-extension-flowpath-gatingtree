@@ -37,7 +37,7 @@ public class Branch {
     public void setColor(int color) { this.color = color; }
 
     public List<GateNode> getChildren() { return children; }
-    public void setChildren(List<GateNode> children) { this.children = children; }
+    public void setChildren(List<GateNode> children) { this.children = children != null ? children : new ArrayList<>(); }
 
     public int getCount() { return count; }
     public void setCount(int count) { this.count = count; }

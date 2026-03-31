@@ -262,7 +262,6 @@ public class FlowPathPane extends BorderPane {
         previewService.setRoiMask(cachedRoiMask);
         previewService.setGateTree(gateTree);
         previewService.setImageData(imageData);
-        previewService.setUseZScore(editorPane.isUseZScore());
         previewService.setOnStatsRecomputed(() -> {
             editorPane.setMarkerStats(previewService.getMarkerStats());
             recomputeQualityMask();
@@ -313,19 +312,24 @@ public class FlowPathPane extends BorderPane {
         }
 
         // Fallback: extract from detection measurements (minus morphology fields)
-        Set<String> exclude = Set.of(
-            "Centroid X µm", "Centroid Y µm",
-            "area µm²", "eccentricity", "perimeter", "convex_area",
-            "axis_major_length", "axis_minor_length",
+        // Use lowercase prefixes to match both naming conventions:
+        //   QuPath default: "Area µm²", "Centroid X µm", "Eccentricity", "Perimeter µm", "Solidity", "Convex Area µm²", "Major Axis Length µm", "Minor Axis Length µm"
+        //   import_phenotype.groovy: "area µm²", "eccentricity", "perimeter", "convex_area", "axis_major_length", "axis_minor_length"
+        Set<String> excludePrefixes = Set.of(
+            "centroid", "area", "eccentricity", "perimeter", "convex",
+            "solidity", "axis_major", "axis_minor", "major axis", "minor axis",
             "x", "y", "label", "fov", "cell_size"
         );
 
         if (measurementKeys.isEmpty()) return Collections.emptyList();
 
         return measurementKeys.stream()
-            .filter(name -> !exclude.contains(name))
             .filter(name -> !name.startsWith("["))
             .filter(name -> !name.startsWith("_"))
+            .filter(name -> {
+                String lower = name.toLowerCase();
+                return excludePrefixes.stream().noneMatch(lower::startsWith);
+            })
             .sorted()
             .collect(Collectors.toList());
     }
@@ -555,8 +559,7 @@ public class FlowPathPane extends BorderPane {
     private boolean[] computeAncestorMask(GateNode node) {
         if (cellIndex == null || markerStats == null) return null;
         boolean[] baseMask = getCombinedMask();
-        return GatingEngine.computeAncestorMask(gateTree, node, cellIndex, markerStats,
-                editorPane.isUseZScore(), baseMask);
+        return GatingEngine.computeAncestorMask(gateTree, node, cellIndex, markerStats, baseMask);
     }
 
     /** Recompute and apply the ancestor mask for the currently selected gate. */
@@ -628,7 +631,6 @@ public class FlowPathPane extends BorderPane {
 
     private void onGateNodeChanged() {
         pushUndoCoalesced();
-        previewService.setUseZScore(editorPane.isUseZScore());
         treeView.refresh();
         requestPreviewUpdate();
     }
@@ -691,6 +693,17 @@ public class FlowPathPane extends BorderPane {
         return count;
     }
 
+    private void collectGateChannels(List<GateNode> nodes, Set<String> missing, Set<String> available) {
+        for (GateNode node : nodes) {
+            for (String ch : node.getChannels()) {
+                if (ch != null && !available.contains(ch)) missing.add(ch);
+            }
+            for (Branch branch : node.getBranches()) {
+                collectGateChannels(branch.getChildren(), missing, available);
+            }
+        }
+    }
+
     // --- IO ---
 
     private void saveTree() {
@@ -722,6 +735,18 @@ public class FlowPathPane extends BorderPane {
             rebuildTreeView();
             onQualityFilterChanged();
             requestPreviewUpdate();
+
+            // Check for missing markers and warn user
+            if (markerNames != null && !markerNames.isEmpty()) {
+                Set<String> available = new HashSet<>(markerNames);
+                Set<String> missing = new LinkedHashSet<>();
+                collectGateChannels(gateTree.getRoots(), missing, available);
+                if (!missing.isEmpty()) {
+                    Dialogs.showWarningNotification("FlowPath",
+                        "Gate channels not found in current image: " + String.join(", ", missing));
+                }
+            }
+
             Dialogs.showInfoNotification("FlowPath", "Loaded from " + file.getName());
         } catch (Exception ex) {
             Dialogs.showErrorMessage("Load Error", ex.getMessage());
@@ -739,7 +764,7 @@ public class FlowPathPane extends BorderPane {
 
         try {
             GatingEngine.AssignmentResult result = GatingEngine.assignAll(
-                gateTree, cellIndex, markerStats, editorPane.isUseZScore(), cachedRoiMask);
+                gateTree, cellIndex, markerStats, cachedRoiMask);
             PhenotypeCsvExporter.export(file, cellIndex, result, gateTree, markerStats);
             Dialogs.showInfoNotification("FlowPath", "Exported " + file.getName());
         } catch (Exception ex) {
@@ -845,6 +870,7 @@ public class FlowPathPane extends BorderPane {
 
     private void afterUndoRedo() {
         lastUndoPushTime = 0;
+        currentNode = null;
         qualityFilterPane.setFilter(gateTree.getQualityFilter());
         editorPane.setGateNode(null);
         rebuildTreeView();

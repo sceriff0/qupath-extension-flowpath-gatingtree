@@ -105,7 +105,7 @@ class PhenotypeCsvExporterTest {
         tree.setQualityFilter(null);
         tree.addRoot(gate);
 
-        AssignmentResult result = GatingEngine.assignAll(tree, index, stats, false);
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
 
         File csvFile = tempDir.resolve("basic.csv").toFile();
         PhenotypeCsvExporter.export(csvFile, index, result, tree, stats);
@@ -157,7 +157,7 @@ class PhenotypeCsvExporterTest {
         boolean[] mask = GatingEngine.computeQualityMask(index, qf);
         MarkerStats stats = MarkerStats.compute(index, mask);
 
-        AssignmentResult result = GatingEngine.assignAll(tree, index, stats, false);
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
 
         // Count non-excluded
         int nonExcluded = 0;
@@ -190,7 +190,7 @@ class PhenotypeCsvExporterTest {
         tree.setQualityFilter(null);
         tree.addRoot(gate);
 
-        AssignmentResult result = GatingEngine.assignAll(tree, index, stats, false);
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
 
         File csvFile = tempDir.resolve("signs.csv").toFile();
         PhenotypeCsvExporter.export(csvFile, index, result, tree, stats);
@@ -240,7 +240,7 @@ class PhenotypeCsvExporterTest {
         tree.setQualityFilter(null);
         tree.addRoot(root);
 
-        AssignmentResult result = GatingEngine.assignAll(tree, index, stats, false);
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
 
         File csvFile = tempDir.resolve("nested.csv").toFile();
         PhenotypeCsvExporter.export(csvFile, index, result, tree, stats);
@@ -291,7 +291,7 @@ class PhenotypeCsvExporterTest {
         tree.setQualityFilter(null);
         tree.addRoot(gate);
 
-        AssignmentResult result = GatingEngine.assignAll(tree, index, stats, false);
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
 
         File csvFile = tempDir.resolve("escape.csv").toFile();
         PhenotypeCsvExporter.export(csvFile, index, result, tree, stats);
@@ -326,7 +326,7 @@ class PhenotypeCsvExporterTest {
         GateTree tree = new GateTree();
         tree.setQualityFilter(null);
 
-        AssignmentResult result = GatingEngine.assignAll(tree, index, stats, false);
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
 
         File csvFile = tempDir.resolve("empty_tree.csv").toFile();
         PhenotypeCsvExporter.export(csvFile, index, result, tree, stats);
@@ -366,7 +366,7 @@ class PhenotypeCsvExporterTest {
         boolean[] mask = GatingEngine.computeQualityMask(index, qf);
         MarkerStats stats = MarkerStats.compute(index, mask);
 
-        AssignmentResult result = GatingEngine.assignAll(tree, index, stats, false);
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
 
         // Verify all are excluded
         for (boolean ex : result.getExcluded()) {

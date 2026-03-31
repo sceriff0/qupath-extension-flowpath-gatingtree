@@ -441,7 +441,7 @@ public class ScatterPlotCanvas extends Canvas {
     }
 
     private void fireHandleDragComplete() {
-        if (polygonVertices != null && onPolygonDrawn != null) {
+        if (polygonVertices != null && polygonVertices.size() >= 3 && onPolygonDrawn != null) {
             onPolygonDrawn.accept(new ArrayList<>(polygonVertices));
         } else if (rectBounds != null && onRectangleDrawn != null) {
             onRectangleDrawn.accept(new double[]{rectBounds[0], rectBounds[1], rectBounds[2], rectBounds[3]});

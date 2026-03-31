@@ -129,7 +129,7 @@ public class MarkerStats {
 
     public double getPercentileValue(String channel, double percentile) {
         double[] sorted = sortedValues.get(channel);
-        if (sorted == null || sorted.length == 0) return 0.0;
+        if (sorted == null || sorted.length == 0) return Double.NaN;
         double idx = (percentile / 100.0) * (sorted.length - 1);
         int lo = (int) Math.floor(idx);
         int hi = (int) Math.ceil(idx);
