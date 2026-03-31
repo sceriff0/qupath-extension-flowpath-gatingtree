@@ -210,6 +210,14 @@ public class QualityFilterPane extends TitledPane {
         filter.setMinPerimeter(perimMinSlider.getValue());
         syncMaxFilterValue(perimMaxSlider, v -> this.filter.setMaxPerimeter(v));
 
+        // Refresh labels to match synced filter values (slider clamping can leave labels stale)
+        areaMinLabel.setText(fmt(filter.getMinArea()));
+        areaMaxLabel.setText(fmtMax(filter.getMaxArea()));
+        totalIntMinLabel.setText(fmt(filter.getMinTotalIntensity()));
+        totalIntMaxLabel.setText(fmtMax(filter.getMaxTotalIntensity()));
+        perimMinLabel.setText(fmt(filter.getMinPerimeter()));
+        perimMaxLabel.setText(fmtMax(filter.getMaxPerimeter()));
+
         suppressEvents = false;
     }
 
@@ -230,11 +238,11 @@ public class QualityFilterPane extends TitledPane {
         eccentMinSlider.setDisable(!hasEccentricity);
         eccentMaxSlider.setDisable(!hasEccentricity);
         eccentMinLabel.setText(hasEccentricity ? fmt(filter.getMinEccentricity()) : "\u2014");
-        eccentMaxLabel.setText(hasEccentricity ? fmt(filter.getMaxEccentricity()) : "\u2014");
+        eccentMaxLabel.setText(hasEccentricity ? (filter.getMaxEccentricity() >= 1.0 ? "off" : fmt(filter.getMaxEccentricity())) : "\u2014");
         solidMinSlider.setDisable(!hasSolidity);
         solidMaxSlider.setDisable(!hasSolidity);
         solidMinLabel.setText(hasSolidity ? fmt(filter.getMinSolidity()) : "\u2014");
-        solidMaxLabel.setText(hasSolidity ? fmt(filter.getMaxSolidity()) : "\u2014");
+        solidMaxLabel.setText(hasSolidity ? (filter.getMaxSolidity() >= 1.0 ? "off" : fmt(filter.getMaxSolidity())) : "\u2014");
         perimMinSlider.setDisable(!hasPerimeter);
         perimMaxSlider.setDisable(!hasPerimeter);
         perimMinLabel.setText(hasPerimeter ? fmt(filter.getMinPerimeter()) : "\u2014");
@@ -330,5 +338,11 @@ public class QualityFilterPane extends TitledPane {
         if (v == Double.MAX_VALUE) return "off";
         if (v == (long) v) return String.format("%.0f", v);
         return String.format("%.2f", v);
+    }
+
+    /** Format a max filter value, showing "off" for any sentinel (Double.MAX_VALUE or bounded 1.0). */
+    private String fmtMax(double v) {
+        if (v == Double.MAX_VALUE) return "off";
+        return fmt(v);
     }
 }

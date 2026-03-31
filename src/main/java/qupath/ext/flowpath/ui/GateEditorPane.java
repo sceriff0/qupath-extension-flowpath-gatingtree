@@ -230,7 +230,7 @@ public class GateEditorPane extends VBox {
                 if (clamped != val) { clipLowSpinner.getValueFactory().setValue(clamped); return; }
                 currentNode.setClipPercentileLow(val);
                 updateHistogram();
-                if (currentScatter != null && markerStats != null && ancestorMask == null) {
+                if (currentScatter != null && markerStats != null) {
                     String cx = get2DChannelX(currentNode);
                     String cy = get2DChannelY(currentNode);
                     if (cx != null && cy != null) {
@@ -247,7 +247,7 @@ public class GateEditorPane extends VBox {
                 if (clamped != val) { clipHighSpinner.getValueFactory().setValue(clamped); return; }
                 currentNode.setClipPercentileHigh(val);
                 updateHistogram();
-                if (currentScatter != null && markerStats != null && ancestorMask == null) {
+                if (currentScatter != null && markerStats != null) {
                     String cx = get2DChannelX(currentNode);
                     String cy = get2DChannelY(currentNode);
                     if (cx != null && cy != null) {
@@ -542,9 +542,7 @@ public class GateEditorPane extends VBox {
                 ScatterPlotCanvas scatter = new ScatterPlotCanvas();
                 scatter.setData(filtered[0], filtered[1], gate.getChannelX(), gate.getChannelY());
                 scatter.setCrosshairOverlay(gate.getThresholdX(), gate.getThresholdY());
-                // Only override axis range when showing all cells (no ancestor mask).
-                // Child gates use the filtered data's auto-range for proper centering.
-                if (markerStats != null && ancestorMask == null) {
+                if (markerStats != null) {
                     if (gate.isThresholdIsZScore()) {
                         applyClipAxisRangeZScore(scatter, gate.getChannelX(), gate.getChannelY(), gate);
                     } else {
@@ -665,9 +663,7 @@ public class GateEditorPane extends VBox {
                     filtered = getFilteredXY(mxIdx, myIdx);
                 }
                 scatter.setData(filtered[0], filtered[1], chX, chY);
-                // Only override axis range when showing all cells (no ancestor mask).
-                // Child gates use the filtered data's auto-range for proper centering.
-                if (markerStats != null && ancestorMask == null) {
+                if (markerStats != null) {
                     if (node.isThresholdIsZScore()) {
                         applyClipAxisRangeZScore(scatter, chX, chY, node);
                     } else {
@@ -1160,7 +1156,7 @@ public class GateEditorPane extends VBox {
             filtered = getFilteredXY(mxIdx, myIdx);
         }
         currentScatter.setData(filtered[0], filtered[1], chX, chY);
-        if (markerStats != null && ancestorMask == null) {
+        if (markerStats != null) {
             if (currentNode.isThresholdIsZScore()) {
                 applyClipAxisRangeZScore(currentScatter, chX, chY, currentNode);
             } else {
