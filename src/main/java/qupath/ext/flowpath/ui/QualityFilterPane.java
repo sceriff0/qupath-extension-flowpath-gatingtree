@@ -327,6 +327,7 @@ public class QualityFilterPane extends TitledPane {
     }
 
     private String fmt(double v) {
+        if (v == Double.MAX_VALUE) return "off";
         if (v == (long) v) return String.format("%.0f", v);
         return String.format("%.2f", v);
     }

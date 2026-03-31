@@ -60,6 +60,7 @@ public class GateEditorPane extends VBox {
     // Non-null only when a 2D gate editor (quadrant/polygon/rect/ellipse) is active.
     // Used by shared clip controls to update axis range. Cleared in setGateNode().
     private ScatterPlotCanvas currentScatter;
+    private Label clipInfoLabel;
 
     private Consumer<GateNode> onNodeChanged;
     private Runnable onAddToPositive;
@@ -220,7 +221,8 @@ public class GateEditorPane extends VBox {
         excludeOutliersBox.setStyle("-fx-text-fill: white;");
         excludeOutliersBox.setTooltip(new Tooltip(
             "When enabled, cells with marker values outside the clip percentile range\n" +
-            "are classified as 'Excluded' and removed from gating and CSV export."));
+            "are classified as 'Excluded' and removed from gating and CSV export.\n" +
+            "Percentiles are computed from all quality-passing cells, not per gate population."));
 
         clipLowSpinner.valueProperty().addListener((obs, old, val) -> {
             if (!suppressEvents && currentNode != null) {
@@ -228,7 +230,7 @@ public class GateEditorPane extends VBox {
                 if (clamped != val) { clipLowSpinner.getValueFactory().setValue(clamped); return; }
                 currentNode.setClipPercentileLow(val);
                 updateHistogram();
-                if (currentScatter != null && markerStats != null) {
+                if (currentScatter != null && markerStats != null && ancestorMask == null) {
                     String cx = get2DChannelX(currentNode);
                     String cy = get2DChannelY(currentNode);
                     if (cx != null && cy != null) {
@@ -245,7 +247,7 @@ public class GateEditorPane extends VBox {
                 if (clamped != val) { clipHighSpinner.getValueFactory().setValue(clamped); return; }
                 currentNode.setClipPercentileHigh(val);
                 updateHistogram();
-                if (currentScatter != null && markerStats != null) {
+                if (currentScatter != null && markerStats != null && ancestorMask == null) {
                     String cx = get2DChannelX(currentNode);
                     String cy = get2DChannelY(currentNode);
                     if (cx != null && cy != null) {
@@ -262,6 +264,12 @@ public class GateEditorPane extends VBox {
                 fireNodeChanged();
             }
         });
+
+        Label clipInfoLabel = new Label("Percentiles based on all cells, not this gate's population");
+        clipInfoLabel.setStyle("-fx-text-fill: #666666; -fx-font-size: 9; -fx-font-style: italic;");
+        clipInfoLabel.setVisible(false);
+        clipInfoLabel.managedProperty().bind(clipInfoLabel.visibleProperty());
+        this.clipInfoLabel = clipInfoLabel;
 
         HBox clipRow = new HBox(6,
             new Label("Clip:") {{ setStyle("-fx-text-fill: white;"); }},
@@ -311,7 +319,7 @@ public class GateEditorPane extends VBox {
         getChildren().addAll(
             gateTypeLabel,
             gateSpecificArea,
-            createSectionHeader("Outlier Clipping"), clipRow,
+            createSectionHeader("Outlier Clipping"), clipRow, clipInfoLabel,
             new Separator(),
             branchNamesArea,
             new Separator(),
@@ -446,22 +454,32 @@ public class GateEditorPane extends VBox {
             fireNodeChanged();
         }});
 
-        // Compute slider ranges from data (z-score or raw)
+        // Compute slider ranges from data (z-score or raw).
+        // For child gates with ancestor mask, use the filtered data range for proper centering.
         double sliderMinX = -5, sliderMaxX = 5, sliderMinY = -5, sliderMaxY = 5;
-        if (markerStats != null && cellIndex != null && gate.getChannelX() != null && gate.getChannelY() != null) {
-            double pLoX = markerStats.getPercentileValue(gate.getChannelX(), gate.getClipPercentileLow());
-            double pHiX = markerStats.getPercentileValue(gate.getChannelX(), gate.getClipPercentileHigh());
-            double pLoY = markerStats.getPercentileValue(gate.getChannelY(), gate.getClipPercentileLow());
-            double pHiY = markerStats.getPercentileValue(gate.getChannelY(), gate.getClipPercentileHigh());
-            if (!Double.isNaN(pLoX) && !Double.isNaN(pHiX) && !Double.isNaN(pLoY) && !Double.isNaN(pHiY)) {
-                if (gate.isThresholdIsZScore()) {
-                    sliderMinX = markerStats.toZScore(gate.getChannelX(), pLoX);
-                    sliderMaxX = markerStats.toZScore(gate.getChannelX(), pHiX);
-                    sliderMinY = markerStats.toZScore(gate.getChannelY(), pLoY);
-                    sliderMaxY = markerStats.toZScore(gate.getChannelY(), pHiY);
+        if (cellIndex != null && gate.getChannelX() != null && gate.getChannelY() != null) {
+            int mxI = cellIndex.getMarkerIndex(gate.getChannelX());
+            int myI = cellIndex.getMarkerIndex(gate.getChannelY());
+            if (mxI >= 0 && myI >= 0) {
+                double[][] fData;
+                if (gate.isThresholdIsZScore() && markerStats != null) {
+                    fData = getFilteredXYWithZScore(mxI, myI, gate.getChannelX(), gate.getChannelY());
                 } else {
-                    sliderMinX = pLoX; sliderMaxX = pHiX;
-                    sliderMinY = pLoY; sliderMaxY = pHiY;
+                    fData = getFilteredXY(mxI, myI);
+                }
+                if (fData[0].length > 0) {
+                    double dMinX = Double.MAX_VALUE, dMaxX = -Double.MAX_VALUE;
+                    double dMinY = Double.MAX_VALUE, dMaxY = -Double.MAX_VALUE;
+                    for (int i = 0; i < fData[0].length; i++) {
+                        if (!Double.isNaN(fData[0][i]) && !Double.isNaN(fData[1][i])) {
+                            dMinX = Math.min(dMinX, fData[0][i]);
+                            dMaxX = Math.max(dMaxX, fData[0][i]);
+                            dMinY = Math.min(dMinY, fData[1][i]);
+                            dMaxY = Math.max(dMaxY, fData[1][i]);
+                        }
+                    }
+                    if (dMaxX > dMinX) { sliderMinX = dMinX; sliderMaxX = dMaxX; }
+                    if (dMaxY > dMinY) { sliderMinY = dMinY; sliderMaxY = dMaxY; }
                 }
             }
         }
@@ -524,7 +542,9 @@ public class GateEditorPane extends VBox {
                 ScatterPlotCanvas scatter = new ScatterPlotCanvas();
                 scatter.setData(filtered[0], filtered[1], gate.getChannelX(), gate.getChannelY());
                 scatter.setCrosshairOverlay(gate.getThresholdX(), gate.getThresholdY());
-                if (markerStats != null) {
+                // Only override axis range when showing all cells (no ancestor mask).
+                // Child gates use the filtered data's auto-range for proper centering.
+                if (markerStats != null && ancestorMask == null) {
                     if (gate.isThresholdIsZScore()) {
                         applyClipAxisRangeZScore(scatter, gate.getChannelX(), gate.getChannelY(), gate);
                     } else {
@@ -645,7 +665,9 @@ public class GateEditorPane extends VBox {
                     filtered = getFilteredXY(mxIdx, myIdx);
                 }
                 scatter.setData(filtered[0], filtered[1], chX, chY);
-                if (markerStats != null) {
+                // Only override axis range when showing all cells (no ancestor mask).
+                // Child gates use the filtered data's auto-range for proper centering.
+                if (markerStats != null && ancestorMask == null) {
                     if (node.isThresholdIsZScore()) {
                         applyClipAxisRangeZScore(scatter, chX, chY, node);
                     } else {
@@ -903,7 +925,10 @@ public class GateEditorPane extends VBox {
             refreshScatterPlot();
         }
     }
-    public void setAncestorMask(boolean[] mask) { this.ancestorMask = mask; }
+    public void setAncestorMask(boolean[] mask) {
+        this.ancestorMask = mask;
+        if (clipInfoLabel != null) clipInfoLabel.setVisible(mask != null);
+    }
     public void setOnNodeChanged(Consumer<GateNode> callback) { this.onNodeChanged = callback; }
     public void setOnAddToPositive(Runnable callback) { this.onAddToPositive = callback; }
     public void setOnAddToNegative(Runnable callback) { this.onAddToNegative = callback; }
@@ -1135,7 +1160,7 @@ public class GateEditorPane extends VBox {
             filtered = getFilteredXY(mxIdx, myIdx);
         }
         currentScatter.setData(filtered[0], filtered[1], chX, chY);
-        if (markerStats != null) {
+        if (markerStats != null && ancestorMask == null) {
             if (currentNode.isThresholdIsZScore()) {
                 applyClipAxisRangeZScore(currentScatter, chX, chY, currentNode);
             } else {
