@@ -143,11 +143,12 @@ class CellIndexTest {
     }
 
     @Test
-    void missingMarkerValueReturnsZero() {
+    void missingMarkerValueReturnsNaN() {
         var c = createCell();
         var index = CellIndex.build(List.of(c), List.of("MISSING"));
 
-        assertEquals(0.0, index.getMarkerValues(0)[0]);
+        assertTrue(Double.isNaN(index.getMarkerValues(0)[0]),
+                "Absent markers should return NaN to distinguish from true zero");
     }
 
     @Test

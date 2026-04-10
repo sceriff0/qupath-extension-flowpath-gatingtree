@@ -22,6 +22,7 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -51,7 +52,7 @@ public class FlowPathSerializer {
         root.add("gates", serializeNodeList(tree.getRoots()));
 
         Gson gson = new GsonBuilder().setPrettyPrinting().create();
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(file))) {
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(file, StandardCharsets.UTF_8))) {
             writer.write(gson.toJson(root));
         }
     }
@@ -65,8 +66,12 @@ public class FlowPathSerializer {
      */
     public static GateTree load(File file) throws IOException {
         JsonObject root;
-        try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
-            root = JsonParser.parseReader(reader).getAsJsonObject();
+        try (BufferedReader reader = new BufferedReader(new FileReader(file, StandardCharsets.UTF_8))) {
+            try {
+                root = JsonParser.parseReader(reader).getAsJsonObject();
+            } catch (com.google.gson.JsonSyntaxException | IllegalStateException e) {
+                throw new IOException("Invalid FlowPath file (bad JSON): " + e.getMessage(), e);
+            }
         }
 
         // Version check (currently only version 1 is supported)

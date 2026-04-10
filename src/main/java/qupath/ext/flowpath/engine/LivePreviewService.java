@@ -141,7 +141,12 @@ public class LivePreviewService {
         }
         final boolean[] roi = this.roiMask != null ? this.roiMask.clone() : null;
         final CellIndex idx = this.cellIndex;
-        final QualityFilter qf = gateTree.getQualityFilter().deepCopy();
+        final QualityFilter rawQf = gateTree.getQualityFilter();
+        if (rawQf == null) {
+            requestUpdate();
+            return;
+        }
+        final QualityFilter qf = rawQf.deepCopy();
         executor.submit(() -> {
             boolean[] qualityMask = GatingEngine.computeQualityMask(idx, qf);
             boolean[] mask = roi != null ? GatingEngine.combineMasks(qualityMask, roi) : qualityMask;
@@ -172,7 +177,7 @@ public class LivePreviewService {
         final CellIndex index = this.cellIndex;
         final MarkerStats stats = this.markerStats;
         final ImageData<?> data = this.imageData;
-        final boolean[] roi = this.roiMask;
+        final boolean[] roi = this.roiMask != null ? this.roiMask.clone() : null;
 
         if (originalTree == null || index == null || stats == null || data == null) {
             return;
@@ -189,6 +194,8 @@ public class LivePreviewService {
             GatingEngine.AssignmentResult result = GatingEngine.assignAll(tree, index, stats, roi);
 
             Platform.runLater(() -> {
+                // Discard result if the live tree changed (e.g. undo/redo) while we were computing
+                if (this.gateTree != originalTree) return;
                 // Transfer counts from the snapshot back to the live tree for UI display
                 GateTree.transferCounts(originalTree.getRoots(), tree.getRoots());
                 applyResult(result, index, data);

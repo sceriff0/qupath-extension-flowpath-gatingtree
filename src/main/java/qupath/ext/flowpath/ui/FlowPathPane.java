@@ -217,6 +217,11 @@ public class FlowPathPane extends BorderPane {
 
         Collection<PathObject> detections = imageData.getHierarchy().getDetectionObjects();
         if (detections.isEmpty()) {
+            cellIndex = null;
+            markerStats = null;
+            markerNames = Collections.emptyList();
+            editorPane.setChannelNames(markerNames);
+            editorPane.setGateNode(null);
             Dialogs.showWarningNotification("FlowPath", "No detections found. Import GeoJSON cells first.");
             return;
         }
@@ -263,9 +268,9 @@ public class FlowPathPane extends BorderPane {
         previewService.setGateTree(gateTree);
         previewService.setImageData(imageData);
         previewService.setOnStatsRecomputed(() -> {
-            editorPane.setMarkerStats(previewService.getMarkerStats());
             recomputeQualityMask();
             refreshAncestorMask();
+            editorPane.setMarkerStats(previewService.getMarkerStats());
         });
 
         // Listen for annotation changes (add/remove) to recompute ROI mask
@@ -292,9 +297,15 @@ public class FlowPathPane extends BorderPane {
      * Falls back to detection measurements if no image channels are found.
      */
     private List<String> discoverMarkerNames(ImageData<?> imageData, Collection<PathObject> detections) {
-        PathObject sample = detections.iterator().next();
-        var measurements = sample.getMeasurements();
-        Set<String> measurementKeys = (measurements != null) ? measurements.keySet() : Set.of();
+        // Sample measurement keys from multiple cells (not just first) because
+        // cells exported with NaN values (e.g. Mirage pipeline) may lack some keys
+        Set<String> measurementKeys = new LinkedHashSet<>();
+        int sampled = 0;
+        for (PathObject obj : detections) {
+            var m = obj.getMeasurements();
+            if (m != null) measurementKeys.addAll(m.keySet());
+            if (++sampled >= 100) break;
+        }
 
         // Primary: get channel names from image metadata, validate against measurements
         var server = imageData.getServer();
@@ -478,8 +489,12 @@ public class FlowPathPane extends BorderPane {
         // Suppress selection events during rebuild to prevent the editor from being
         // cleared — the editor already updated its currentNode in the draw callback.
         suppressTreeSelection = true;
-        rebuildTreeView();
-        selectNodeInTree(newNode);
+        try {
+            rebuildTreeView();
+            selectNodeInTree(newNode);
+        } finally {
+            suppressTreeSelection = false;
+        }
         requestPreviewUpdate();
     }
 
@@ -500,12 +515,13 @@ public class FlowPathPane extends BorderPane {
     }
 
     private void selectNodeInTree(GateNode node) {
+        boolean wasSuppressed = suppressTreeSelection;
         suppressTreeSelection = true;
         TreeItem<Object> item = findTreeItem(treeView.getRoot(), node);
         if (item != null) {
             treeView.getSelectionModel().select(item);
         }
-        suppressTreeSelection = false;
+        suppressTreeSelection = wasSuppressed;
     }
 
     private TreeItem<Object> findTreeItem(TreeItem<Object> parent, GateNode target) {
@@ -664,11 +680,9 @@ public class FlowPathPane extends BorderPane {
     }
 
     private void onPreviewUpdated() {
-        // Refresh tree cell counts and status bar
-        Platform.runLater(() -> {
-            treeView.refresh();
-            updateStatusBar();
-        });
+        // Already on FX thread (called from Platform.runLater in the constructor callback)
+        treeView.refresh();
+        updateStatusBar();
     }
 
     private void updateStatusBar() {

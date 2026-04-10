@@ -187,20 +187,16 @@ public class ScatterPlotCanvas extends Canvas {
     // ---- Effective axis bounds (override if set, otherwise auto-computed) ----
 
     private double effectiveMinX() {
-        if (overrideMinX != null && overrideMaxX != null) return overrideMinX - (overrideMaxX - overrideMinX) * 0.05;
-        return minX;
+        return overrideMinX != null ? overrideMinX : minX;
     }
     private double effectiveMaxX() {
-        if (overrideMinX != null && overrideMaxX != null) return overrideMaxX + (overrideMaxX - overrideMinX) * 0.05;
-        return maxX;
+        return overrideMaxX != null ? overrideMaxX : maxX;
     }
     private double effectiveMinY() {
-        if (overrideMinY != null && overrideMaxY != null) return overrideMinY - (overrideMaxY - overrideMinY) * 0.05;
-        return minY;
+        return overrideMinY != null ? overrideMinY : minY;
     }
     private double effectiveMaxY() {
-        if (overrideMinY != null && overrideMaxY != null) return overrideMaxY + (overrideMaxY - overrideMinY) * 0.05;
-        return maxY;
+        return overrideMaxY != null ? overrideMaxY : maxY;
     }
 
     // ---- Coordinate conversion helpers ----

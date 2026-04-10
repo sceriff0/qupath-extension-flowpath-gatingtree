@@ -79,7 +79,9 @@ public class CellIndex {
             for (int j = 0; j < m; j++) {
                 double v = findMarkerValue(measurements, markers[j]);
                 values[j][i] = v;
-                totalIntensity += v;
+                if (!Double.isNaN(v)) {
+                    totalIntensity += v;
+                }
             }
             totalIntensities[i] = totalIntensity;
 
@@ -116,7 +118,7 @@ public class CellIndex {
                 return entry.getValue().doubleValue();
             }
         }
-        return 0.0;
+        return Double.NaN;
     }
 
     /**

@@ -15,6 +15,7 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -59,7 +60,7 @@ public class PhenotypeCsvExporter {
         String[] phenotypes = result.getPhenotypes();
         boolean[] excluded = result.getExcluded();
 
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(file))) {
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(file, StandardCharsets.UTF_8))) {
             // Write header
             writer.write("cell_id,phenotype,centroid_x,centroid_y,area,perimeter,eccentricity,solidity");
             for (String marker : markerColumns) {
@@ -110,7 +111,7 @@ public class PhenotypeCsvExporter {
 
                     writer.write(',' + fmt(raw));
                     writer.write(',' + fmt(zscore));
-                    writer.write(',' + sign);
+                    writer.write(',' + escapeCsv(sign));
                 }
                 writer.newLine();
             }

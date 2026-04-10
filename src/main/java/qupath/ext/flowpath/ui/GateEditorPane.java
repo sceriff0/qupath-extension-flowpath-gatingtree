@@ -566,6 +566,10 @@ public class GateEditorPane extends VBox {
                             f = getFilteredXY(mx, my);
                         }
                         scatter.setData(f[0], f[1], gate.getChannelX(), gate.getChannelY());
+                        if (markerStats != null) {
+                            if (gate.isThresholdIsZScore()) applyClipAxisRangeZScore(scatter, gate.getChannelX(), gate.getChannelY(), gate);
+                            else applyClipAxisRange(scatter, gate.getChannelX(), gate.getChannelY(), gate);
+                        }
                     }
                 };
                 chXCombo.setOnAction(e -> { if (!suppressEvents) {
@@ -782,6 +786,10 @@ public class GateEditorPane extends VBox {
                             f = getFilteredXY(mx, my);
                         }
                         scatter.setData(f[0], f[1], cx, cy);
+                        if (markerStats != null) {
+                            if (node.isThresholdIsZScore()) applyClipAxisRangeZScore(scatter, cx, cy, node);
+                            else applyClipAxisRange(scatter, cx, cy, node);
+                        }
                     }
                     fireNodeChanged();
                 };
@@ -924,6 +932,10 @@ public class GateEditorPane extends VBox {
     public void setAncestorMask(boolean[] mask) {
         this.ancestorMask = mask;
         if (clipInfoLabel != null) clipInfoLabel.setVisible(mask != null);
+        if (currentNode != null) {
+            updateHistogram();
+            refreshScatterPlot();
+        }
     }
     public void setOnNodeChanged(Consumer<GateNode> callback) { this.onNodeChanged = callback; }
     public void setOnAddToPositive(Runnable callback) { this.onAddToPositive = callback; }

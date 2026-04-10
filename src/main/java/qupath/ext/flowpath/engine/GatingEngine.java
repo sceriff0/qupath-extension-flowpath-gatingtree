@@ -230,11 +230,16 @@ public final class GatingEngine {
         // Find the path from root to the target node
         java.util.List<Object> path = new java.util.ArrayList<>();
         if (!findPath(tree.getRoots(), target, path)) {
-            // Target is a root node — all non-excluded cells reach it
-            Arrays.fill(mask, true);
-            if (baseMask != null) {
-                for (int i = 0; i < n; i++) mask[i] = baseMask[i];
+            // findPath returns false for both root nodes and nodes not in the tree.
+            // Only fill with true if the target is actually a root node.
+            if (tree.getRoots().contains(target)) {
+                if (baseMask != null) {
+                    System.arraycopy(baseMask, 0, mask, 0, n);
+                } else {
+                    Arrays.fill(mask, true);
+                }
             }
+            // If target is not in the tree at all, mask stays all-false
             return mask;
         }
 
@@ -305,10 +310,10 @@ public final class GatingEngine {
             if (node.isExcludeOutliers()) {
                 double loX = stats.getPercentileValue(qg.getChannelX(), node.getClipPercentileLow());
                 double hiX = stats.getPercentileValue(qg.getChannelX(), node.getClipPercentileHigh());
-                if (rawX < loX || rawX > hiX) return -1;
+                if (!Double.isNaN(loX) && !Double.isNaN(hiX) && (rawX < loX || rawX > hiX)) return -1;
                 double loY = stats.getPercentileValue(qg.getChannelY(), node.getClipPercentileLow());
                 double hiY = stats.getPercentileValue(qg.getChannelY(), node.getClipPercentileHigh());
-                if (rawY < loY || rawY > hiY) return -1;
+                if (!Double.isNaN(loY) && !Double.isNaN(hiY) && (rawY < loY || rawY > hiY)) return -1;
             }
             // Use each gate's own z-score flag for consistent evaluation
             boolean gateZScore = qg.isThresholdIsZScore();
@@ -326,10 +331,10 @@ public final class GatingEngine {
             if (node.isExcludeOutliers()) {
                 double loX = stats.getPercentileValue(channels.get(0), node.getClipPercentileLow());
                 double hiX = stats.getPercentileValue(channels.get(0), node.getClipPercentileHigh());
-                if (rawX < loX || rawX > hiX) return -1;
+                if (!Double.isNaN(loX) && !Double.isNaN(hiX) && (rawX < loX || rawX > hiX)) return -1;
                 double loY = stats.getPercentileValue(channels.get(1), node.getClipPercentileLow());
                 double hiY = stats.getPercentileValue(channels.get(1), node.getClipPercentileHigh());
-                if (rawY < loY || rawY > hiY) return -1;
+                if (!Double.isNaN(loY) && !Double.isNaN(hiY) && (rawY < loY || rawY > hiY)) return -1;
             }
             // Use each gate's own z-score flag — boundaries match the scatter plot coordinate space
             boolean gateZScore = node.isThresholdIsZScore();
@@ -349,7 +354,7 @@ public final class GatingEngine {
             if (node.isExcludeOutliers()) {
                 double lo = stats.getPercentileValue(channel, node.getClipPercentileLow());
                 double hi = stats.getPercentileValue(channel, node.getClipPercentileHigh());
-                if (rawValue < lo || rawValue > hi) return -1;
+                if (!Double.isNaN(lo) && !Double.isNaN(hi) && (rawValue < lo || rawValue > hi)) return -1;
             }
             // Use each gate's own z-score flag for consistent evaluation
             boolean gateZScore = node.isThresholdIsZScore();
@@ -399,7 +404,7 @@ public final class GatingEngine {
         if (node.isExcludeOutliers()) {
             double lo = stats.getPercentileValue(channel, node.getClipPercentileLow());
             double hi = stats.getPercentileValue(channel, node.getClipPercentileHigh());
-            if (rawValue < lo || rawValue > hi) {
+            if (!Double.isNaN(lo) && !Double.isNaN(hi) && (rawValue < lo || rawValue > hi)) {
                 excluded[cellIdx] = true;
                 return;
             }
@@ -436,13 +441,13 @@ public final class GatingEngine {
         if (gate.isExcludeOutliers()) {
             double loX = stats.getPercentileValue(gate.getChannelX(), gate.getClipPercentileLow());
             double hiX = stats.getPercentileValue(gate.getChannelX(), gate.getClipPercentileHigh());
-            if (rawX < loX || rawX > hiX) {
+            if (!Double.isNaN(loX) && !Double.isNaN(hiX) && (rawX < loX || rawX > hiX)) {
                 excluded[cellIdx] = true;
                 return;
             }
             double loY = stats.getPercentileValue(gate.getChannelY(), gate.getClipPercentileLow());
             double hiY = stats.getPercentileValue(gate.getChannelY(), gate.getClipPercentileHigh());
-            if (rawY < loY || rawY > hiY) {
+            if (!Double.isNaN(loY) && !Double.isNaN(hiY) && (rawY < loY || rawY > hiY)) {
                 excluded[cellIdx] = true;
                 return;
             }
@@ -477,10 +482,10 @@ public final class GatingEngine {
         if (node.isExcludeOutliers()) {
             double loX = stats.getPercentileValue(chX, node.getClipPercentileLow());
             double hiX = stats.getPercentileValue(chX, node.getClipPercentileHigh());
-            if (rawX < loX || rawX > hiX) { excluded[cellIdx] = true; return; }
+            if (!Double.isNaN(loX) && !Double.isNaN(hiX) && (rawX < loX || rawX > hiX)) { excluded[cellIdx] = true; return; }
             double loY = stats.getPercentileValue(chY, node.getClipPercentileLow());
             double hiY = stats.getPercentileValue(chY, node.getClipPercentileHigh());
-            if (rawY < loY || rawY > hiY) { excluded[cellIdx] = true; return; }
+            if (!Double.isNaN(loY) && !Double.isNaN(hiY) && (rawY < loY || rawY > hiY)) { excluded[cellIdx] = true; return; }
         }
 
         // Use each gate's own z-score flag — boundaries match the scatter plot coordinate space
