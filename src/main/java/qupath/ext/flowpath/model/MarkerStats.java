@@ -53,11 +53,15 @@ public class MarkerStats {
             String name = markers[m];
             double[] raw = index.getMarkerValues(m);
 
-            // Extract passing values
-            double[] passing = new double[passCount];
+            // Extract passing values, filtering out NaN (absent markers)
+            int actualCount = 0;
+            for (int i = 0; i < n; i++) {
+                if (qualityMask[i] && !Double.isNaN(raw[i])) actualCount++;
+            }
+            double[] passing = new double[actualCount];
             int idx = 0;
             for (int i = 0; i < n; i++) {
-                if (qualityMask[i]) {
+                if (qualityMask[i] && !Double.isNaN(raw[i])) {
                     passing[idx++] = raw[i];
                 }
             }
@@ -65,7 +69,7 @@ public class MarkerStats {
             Arrays.sort(passing);
             sortedValues.put(name, passing);
 
-            if (passCount == 0) {
+            if (actualCount == 0) {
                 means.put(name, 0.0);
                 stds.put(name, 0.0);
                 mins.put(name, 0.0);
@@ -76,18 +80,18 @@ public class MarkerStats {
             }
 
             double min = passing[0];
-            double max = passing[passCount - 1];
+            double max = passing[actualCount - 1];
             mins.put(name, min);
             maxs.put(name, max);
 
             double sum = 0;
             for (double v : passing) sum += v;
-            double mean = sum / passCount;
+            double mean = sum / actualCount;
             means.put(name, mean);
 
             double sumSq = 0;
             for (double v : passing) sumSq += (v - mean) * (v - mean);
-            double std = Math.sqrt(sumSq / passCount);
+            double std = Math.sqrt(sumSq / actualCount);
             stds.put(name, std);
 
             // Histogram

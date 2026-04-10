@@ -40,16 +40,11 @@ public class GateEditorPane extends VBox {
     private final VBox branchNamesArea;
     private final VBox actionButtonArea;
 
-    // --- Threshold-specific controls (lazily shown) ---
+    // --- Shared threshold/quadrant controls (reused across gate types) ---
     private final ComboBox<String> channelCombo;
     private final ToggleGroup modeGroup;
     private final RadioButton rawModeBtn;
     private final RadioButton zscoreModeBtn;
-    private final HistogramCanvas histogram;
-    private final Slider thresholdSlider;
-    private final TextField thresholdValueField;
-    private final Label populationCountsLabel;
-    private final Label hoverLabel;
 
     private GateNode currentNode;
     private CellIndex cellIndex;
@@ -60,6 +55,12 @@ public class GateEditorPane extends VBox {
     // Non-null only when a 2D gate editor (quadrant/polygon/rect/ellipse) is active.
     // Used by shared clip controls to update axis range. Cleared in setGateNode().
     private ScatterPlotCanvas currentScatter;
+    // Non-null only when a threshold gate editor is active.
+    // Created fresh in buildThresholdEditor(), cleared in other editor builders.
+    private HistogramCanvas currentHistogram;
+    private Slider currentThresholdSlider;
+    private TextField currentThresholdField;
+    private Label currentPopulationLabel;
     private Label clipInfoLabel;
 
     private Consumer<GateNode> onNodeChanged;
@@ -182,34 +183,6 @@ public class GateEditorPane extends VBox {
             }
         });
 
-        histogram = new HistogramCanvas();
-        hoverLabel = new Label(" ");
-        hoverLabel.setStyle("-fx-text-fill: #aaaaaa; -fx-font-size: 9;");
-        histogram.setOnMouseHover(val -> hoverLabel.setText(String.format("Value: %.4f", val)));
-
-        thresholdSlider = new Slider(-5, 5, 0);
-        thresholdSlider.setPrefWidth(300);
-        thresholdSlider.setBlockIncrement(0.01);
-        thresholdValueField = new TextField("0.0000");
-        thresholdValueField.setPrefWidth(80);
-        thresholdValueField.setStyle("-fx-text-fill: white; -fx-font-family: monospace; -fx-background-color: #3a3a3a;");
-        thresholdSlider.valueProperty().addListener((obs, old, val) -> {
-            if (!suppressEvents && currentNode != null) {
-                currentNode.setThreshold(val.doubleValue());
-                thresholdValueField.setText(String.format("%.4f", val.doubleValue()));
-                histogram.setThreshold(val.doubleValue());
-                fireNodeChanged();
-                updatePopulationCounts();
-            }
-        });
-        thresholdValueField.setOnAction(e -> applyThresholdFromField());
-        thresholdValueField.focusedProperty().addListener((obs, old, focused) -> {
-            if (!focused) applyThresholdFromField();
-        });
-
-        populationCountsLabel = new Label("Positive: -- | Negative: --");
-        populationCountsLabel.setStyle("-fx-text-fill: #aaaaaa; -fx-font-size: 10;");
-
         // --- Shared: Outlier Clipping ---
         clipLowSpinner = new Spinner<>(0.0, 50.0, 1.0, 0.5);
         clipLowSpinner.setPrefWidth(75);
@@ -305,16 +278,6 @@ public class GateEditorPane extends VBox {
                 buildBranchNamesEditor(currentNode);
             }
         });
-        histogram.setOnThresholdChanged(val -> {
-            if (!suppressEvents && currentNode != null) {
-                currentNode.setThreshold(val);
-                thresholdSlider.setValue(val);
-                thresholdValueField.setText(String.format("%.4f", val));
-                fireNodeChanged();
-                updatePopulationCounts();
-            }
-        });
-
         // Assemble
         getChildren().addAll(
             gateTypeLabel,
@@ -336,6 +299,10 @@ public class GateEditorPane extends VBox {
     public void setGateNode(GateNode node) {
         this.currentNode = node;
         this.currentScatter = null;
+        this.currentHistogram = null;
+        this.currentThresholdSlider = null;
+        this.currentThresholdField = null;
+        this.currentPopulationLabel = null;
         if (node == null) {
             withSuppressedEvents(() -> setDisabled(true));
             gateTypeLabel.setText("No gate selected");
@@ -402,24 +369,76 @@ public class GateEditorPane extends VBox {
         if (node.isThresholdIsZScore()) zscoreModeBtn.setSelected(true);
         else rawModeBtn.setSelected(true);
 
-        thresholdSlider.setValue(node.getThreshold());
-        thresholdValueField.setText(String.format("%.4f", node.getThreshold()));
+        // Create fresh controls for this gate (local-creation pattern, like quadrant editor)
+        HistogramCanvas histogram = new HistogramCanvas();
+        Label hoverLabel = new Label(" ");
+        hoverLabel.setStyle("-fx-text-fill: #aaaaaa; -fx-font-size: 9;");
+        histogram.setOnMouseHover(val -> hoverLabel.setText(String.format("Value: %.4f", val)));
+
+        Slider slider = new Slider(-5, 5, node.getThreshold());
+        slider.setPrefWidth(300);
+        slider.setBlockIncrement(0.01);
+        TextField valueField = new TextField(String.format("%.4f", node.getThreshold()));
+        valueField.setPrefWidth(80);
+        valueField.setStyle("-fx-text-fill: white; -fx-font-family: monospace; -fx-background-color: #3a3a3a;");
+
+        Label populationLabel = new Label("Positive: -- | Negative: --");
+        populationLabel.setStyle("-fx-text-fill: #aaaaaa; -fx-font-size: 10;");
+
         histogram.setPosColor(ColorUtils.intToColor(node.getPositiveColor()));
         histogram.setNegColor(ColorUtils.intToColor(node.getNegativeColor()));
 
+        // Store references for external updates (updateHistogram, etc.)
+        currentHistogram = histogram;
+        currentThresholdSlider = slider;
+        currentThresholdField = valueField;
+        currentPopulationLabel = populationLabel;
+
+        // Wire slider listener
+        slider.valueProperty().addListener((obs, old, val) -> {
+            if (!suppressEvents && currentNode != null) {
+                currentNode.setThreshold(val.doubleValue());
+                valueField.setText(String.format("%.4f", val.doubleValue()));
+                histogram.setThreshold(val.doubleValue());
+                fireNodeChanged();
+                updatePopulationCounts();
+            }
+        });
+
+        // Wire text field
+        valueField.setOnAction(e -> applyThresholdFromField());
+        valueField.focusedProperty().addListener((obs, old, focused) -> {
+            if (!focused) applyThresholdFromField();
+        });
+
+        // Wire histogram drag-threshold
+        histogram.setOnThresholdChanged(val -> {
+            if (!suppressEvents && currentNode != null) {
+                currentNode.setThreshold(val);
+                slider.setValue(val);
+                valueField.setText(String.format("%.4f", val));
+                fireNodeChanged();
+                updatePopulationCounts();
+            }
+        });
+
         HBox threshRow = new HBox(8,
             new Label("Threshold:") {{ setStyle("-fx-text-fill: white;"); }},
-            thresholdSlider, thresholdValueField);
-        HBox.setHgrow(thresholdSlider, Priority.ALWAYS);
+            slider, valueField);
+        HBox.setHgrow(slider, Priority.ALWAYS);
 
         gateSpecificArea.getChildren().addAll(
             channelRow, modeRow,
             createSectionHeader("Histogram"), histogram, hoverLabel,
-            createSectionHeader("Threshold"), threshRow, populationCountsLabel
+            createSectionHeader("Threshold"), threshRow, populationLabel
         );
     }
 
     private void buildQuadrantEditor(QuadrantGate gate) {
+        currentHistogram = null;
+        currentThresholdSlider = null;
+        currentThresholdField = null;
+        currentPopulationLabel = null;
         Label chXLabel = new Label("Channel X:");
         chXLabel.setStyle("-fx-text-fill: white;");
         ComboBox<String> chXCombo = new ComboBox<>(channelCombo.getItems());
@@ -599,6 +618,10 @@ public class GateEditorPane extends VBox {
     }
 
     private void build2DEditor(GateNode node) {
+        currentHistogram = null;
+        currentThresholdSlider = null;
+        currentThresholdField = null;
+        currentPopulationLabel = null;
         // Channel pickers
         Label chXLabel = new Label("Channel X:");
         chXLabel.setStyle("-fx-text-fill: white;");
@@ -858,12 +881,13 @@ public class GateEditorPane extends VBox {
                     if (currentScatter != null && currentNode != null) {
                         applyBranchColorsToScatter(currentScatter, currentNode);
                     }
-                    if (currentNode != null && !(currentNode instanceof QuadrantGate)
+                    if (currentHistogram != null && currentNode != null
+                            && !(currentNode instanceof QuadrantGate)
                             && !(currentNode instanceof PolygonGate)
                             && !(currentNode instanceof RectangleGate)
                             && !(currentNode instanceof EllipseGate)) {
-                        histogram.setPosColor(ColorUtils.intToColor(currentNode.getPositiveColor()));
-                        histogram.setNegColor(ColorUtils.intToColor(currentNode.getNegativeColor()));
+                        currentHistogram.setPosColor(ColorUtils.intToColor(currentNode.getPositiveColor()));
+                        currentHistogram.setNegColor(ColorUtils.intToColor(currentNode.getNegativeColor()));
                     }
                     fireNodeChanged();
                 }
@@ -947,8 +971,9 @@ public class GateEditorPane extends VBox {
     public boolean isUseZScore() { return zscoreModeBtn.isSelected(); }
 
     public void updatePopulationCounts() {
+        if (currentPopulationLabel == null) return;
         if (currentNode == null) {
-            populationCountsLabel.setText("Positive: -- | Negative: --");
+            currentPopulationLabel.setText("Positive: -- | Negative: --");
             return;
         }
         List<Branch> branches = currentNode.getBranches();
@@ -957,12 +982,12 @@ public class GateEditorPane extends VBox {
             int neg = branches.get(1).getCount();
             int total = pos + neg;
             if (total > 0) {
-                populationCountsLabel.setText(String.format(
+                currentPopulationLabel.setText(String.format(
                     "%s: %,d (%.1f%%) | %s: %,d (%.1f%%)",
                     branches.get(0).getName(), pos, 100.0 * pos / total,
                     branches.get(1).getName(), neg, 100.0 * neg / total));
             } else {
-                populationCountsLabel.setText(branches.get(0).getName() + ": 0 | " + branches.get(1).getName() + ": 0");
+                currentPopulationLabel.setText(branches.get(0).getName() + ": 0 | " + branches.get(1).getName() + ": 0");
             }
         }
     }
@@ -1027,6 +1052,7 @@ public class GateEditorPane extends VBox {
 
     private void updateHistogram() {
         if (currentNode == null || cellIndex == null || markerStats == null) return;
+        if (currentHistogram == null || currentThresholdSlider == null) return;
         String channel = currentNode.getChannel();
         if (channel == null) return;
         int markerIdx = cellIndex.getMarkerIndex(channel);
@@ -1064,10 +1090,14 @@ public class GateEditorPane extends VBox {
         double clipMin = percentile(sorted, currentNode.getClipPercentileLow());
         double clipMax = percentile(sorted, currentNode.getClipPercentileHigh());
 
-        histogram.setData(displayValues, clipMin, clipMax);
-        histogram.setThreshold(currentNode.getThreshold());
-        thresholdSlider.setMin(clipMin);
-        thresholdSlider.setMax(clipMax);
+        currentHistogram.setData(displayValues, clipMin, clipMax);
+        currentHistogram.setThreshold(currentNode.getThreshold());
+        // Suppress events when updating slider range to prevent clamping from
+        // writing a corrupted value back to the node
+        withSuppressedEvents(() -> {
+            currentThresholdSlider.setMin(clipMin);
+            currentThresholdSlider.setMax(clipMax);
+        });
         updatePopulationCounts();
     }
 
@@ -1096,18 +1126,18 @@ public class GateEditorPane extends VBox {
     }
 
     private void applyThresholdFromField() {
-        if (suppressEvents || currentNode == null) return;
+        if (suppressEvents || currentNode == null || currentThresholdField == null) return;
         try {
-            double val = Double.parseDouble(thresholdValueField.getText().trim());
+            double val = Double.parseDouble(currentThresholdField.getText().trim());
             withSuppressedEvents(() -> {
                 currentNode.setThreshold(val);
-                thresholdSlider.setValue(val);
-                histogram.setThreshold(val);
+                if (currentThresholdSlider != null) currentThresholdSlider.setValue(val);
+                if (currentHistogram != null) currentHistogram.setThreshold(val);
             });
             fireNodeChanged();
             updatePopulationCounts();
         } catch (NumberFormatException ex) {
-            thresholdValueField.setText(String.format("%.4f", currentNode.getThreshold()));
+            currentThresholdField.setText(String.format("%.4f", currentNode.getThreshold()));
         }
     }
 

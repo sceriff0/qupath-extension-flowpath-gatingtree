@@ -172,13 +172,7 @@ public class PhenotypeCsvExporter {
                 for (int c = 0; c < channels.size() && c < signPatterns[i].length; c++) {
                     path.put(channels.get(c), signPatterns[i][c]);
                 }
-                if (branch.isLeaf()) {
-                    result.put(branch.getName(), new LinkedHashMap<>(path));
-                } else {
-                    for (GateNode child : branch.getChildren()) {
-                        traceMarkerSigns(child, path, result);
-                    }
-                }
+                traceBranch(branch, path, result);
             }
         } else if (node instanceof PolygonGate || node instanceof RectangleGate || node instanceof EllipseGate) {
             // 2D region gates: 2 branches (inside="+", outside="-"), 2 channels
@@ -189,13 +183,7 @@ public class PhenotypeCsvExporter {
                 for (String ch : channels) {
                     path.put(ch, signs[Math.min(i, signs.length - 1)]);
                 }
-                if (branch.isLeaf()) {
-                    result.put(branch.getName(), new LinkedHashMap<>(path));
-                } else {
-                    for (GateNode child : branch.getChildren()) {
-                        traceMarkerSigns(child, path, result);
-                    }
-                }
+                traceBranch(branch, path, result);
             }
         } else {
             // Threshold gate: 2 branches (positive="+", negative="-")
@@ -207,13 +195,25 @@ public class PhenotypeCsvExporter {
                 if (!channel.isEmpty()) {
                     path.put(channel, signs[i]);
                 }
-                if (branch.isLeaf()) {
-                    result.put(branch.getName(), new LinkedHashMap<>(path));
-                } else {
-                    for (GateNode child : branch.getChildren()) {
-                        traceMarkerSigns(child, path, result);
-                    }
-                }
+                traceBranch(branch, path, result);
+            }
+        }
+    }
+
+    /**
+     * Record the sign path for a branch. If the branch is a logical leaf
+     * (no children, or all children disabled), record its name directly.
+     * Otherwise recurse into enabled children.
+     */
+    private static void traceBranch(Branch branch, Map<String, String> path,
+                                    Map<String, Map<String, String>> result) {
+        boolean isLogicalLeaf = branch.isLeaf()
+                || branch.getChildren().stream().noneMatch(GateNode::isEnabled);
+        if (isLogicalLeaf) {
+            result.put(branch.getName(), new LinkedHashMap<>(path));
+        } else {
+            for (GateNode child : branch.getChildren()) {
+                traceMarkerSigns(child, path, result);
             }
         }
     }

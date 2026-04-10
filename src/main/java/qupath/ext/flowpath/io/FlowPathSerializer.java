@@ -74,6 +74,15 @@ public class FlowPathSerializer {
             }
         }
 
+        try {
+            return parseGateTree(root);
+        } catch (com.google.gson.JsonSyntaxException | IllegalStateException | ClassCastException
+                 | NullPointerException | IndexOutOfBoundsException e) {
+            throw new IOException("Invalid FlowPath file structure: " + e.getMessage(), e);
+        }
+    }
+
+    private static GateTree parseGateTree(JsonObject root) throws IOException {
         // Version check (currently only version 1 is supported)
         int version = root.has("version") ? root.get("version").getAsInt() : 1;
         if (version > CURRENT_VERSION) {
