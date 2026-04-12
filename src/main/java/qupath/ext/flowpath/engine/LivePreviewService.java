@@ -276,6 +276,7 @@ public class LivePreviewService {
         excludedClass.setColor(excludedColor);
 
         boolean anyChanged = false;
+        boolean colorMutated = false;
         for (int i = 0; i < n; i++) {
             PathObject obj = index.getObject(i);
             if (obj == null) {
@@ -285,12 +286,17 @@ public class LivePreviewService {
             if (!java.util.Objects.equals(obj.getPathClass(), newClass)) {
                 obj.setPathClass(newClass);
                 anyChanged = true;
+            } else if (newClass != null && obj.getPathClass() != null
+                       && obj.getPathClass().getColor() != newClass.getColor()) {
+                // Same PathClass reference but color was mutated — force reassign
+                obj.setPathClass(null);
+                obj.setPathClass(newClass);
+                colorMutated = true;
             }
         }
 
-        // Only fire hierarchy event if any classification actually changed,
-        // and set guard flag so our own hierarchy listener doesn't re-trigger gating
-        if (anyChanged) {
+        // Fire hierarchy event if classifications changed or colors were mutated
+        if (anyChanged || colorMutated) {
             firingHierarchyEvent = true;
             try {
                 data.getHierarchy().fireHierarchyChangedEvent(this);
@@ -308,11 +314,12 @@ public class LivePreviewService {
      * Re-apply colors from the stored last result without re-running the gating engine.
      * Used when the user switches the color-by-root selection.
      *
-     * <p>This is a standalone method rather than calling {@code applyResult} because
-     * PathClass.fromString caches by name — mutating the color via setColor() doesn't
-     * change the object reference, so the anyChanged check in applyResult would never
-     * detect a pure recolor and the hierarchy event wouldn't fire, leaving QuPath's
-     * tile cache stale.</p>
+     * <p>PathClass.fromString caches by name — the same Java object is returned for
+     * the same name string. Mutating its color via setColor() doesn't change the
+     * object reference on each cell's PathClass field, so QuPath's per-object rendering
+     * cache isn't invalidated. We force-reassign via null→class on each cell to trigger
+     * QuPath's per-object change tracking, then fire a hierarchy event for tile-level
+     * cache invalidation.</p>
      */
     private void recolorCells() {
         final GatingEngine.AssignmentResult result = this.lastResult;
@@ -342,16 +349,30 @@ public class LivePreviewService {
                 }
             }
 
+            Map<String, PathClass> classCache = new HashMap<>();
             for (var entry : colorByName.entrySet()) {
                 int packed = entry.getValue();
                 int qupathColor = ColorUtils.toQuPathColor(packed);
                 PathClass pc = PathClass.fromString(entry.getKey(), qupathColor);
                 pc.setColor(qupathColor);
+                classCache.put(entry.getKey(), pc);
             }
 
-            // Always fire hierarchy event — PathClass colors were mutated in-place
-            // but the object references are unchanged, so QuPath needs a manual
-            // nudge to invalidate its tile cache at all zoom levels
+            // Force-reassign PathClass on each cell via null→class to trigger
+            // QuPath's per-object change tracking (same-reference setPathClass
+            // is silently ignored by QuPath)
+            for (int i = 0; i < n; i++) {
+                if (excluded[i]) continue;
+                PathObject obj = index.getObject(i);
+                if (obj == null) continue;
+                PathClass pc = classCache.get(phenotypes[i]);
+                if (pc != null) {
+                    obj.setPathClass(null);
+                    obj.setPathClass(pc);
+                }
+            }
+
+            // Fire hierarchy event for tile-level cache invalidation
             firingHierarchyEvent = true;
             try {
                 data.getHierarchy().fireHierarchyChangedEvent(this);
