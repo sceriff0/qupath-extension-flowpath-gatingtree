@@ -119,8 +119,10 @@ public class LivePreviewService {
      * Set which enabled root's colors to display.
      * Use -1 for default (last root's color).
      * Triggers an immediate recolor without re-running the gating engine.
+     * No-op if the index hasn't changed.
      */
     public void setColorRootIndex(int index) {
+        if (this.colorRootIndex == index) return;
         this.colorRootIndex = index;
         recolorCells();
     }
@@ -220,12 +222,13 @@ public class LivePreviewService {
                 if (this.gateTree != originalTree) return;
                 // Transfer counts from the snapshot back to the live tree for UI display
                 GateTree.transferCounts(originalTree.getRoots(), tree.getRoots());
-                applyResult(result, index, data);
+                applyResult(result, index, data, true);
             });
         });
     }
 
-    private void applyResult(GatingEngine.AssignmentResult result, CellIndex index, ImageData<?> data) {
+    private void applyResult(GatingEngine.AssignmentResult result, CellIndex index, ImageData<?> data,
+                             boolean fireUpdateComplete) {
         // Cache for lightweight recoloring
         this.lastResult = result;
         this.lastIndex = index;
@@ -296,7 +299,7 @@ public class LivePreviewService {
             }
         }
 
-        if (onUpdateComplete != null) {
+        if (fireUpdateComplete && onUpdateComplete != null) {
             onUpdateComplete.run();
         }
     }
@@ -304,12 +307,13 @@ public class LivePreviewService {
     /**
      * Re-apply colors from the stored last result without re-running the gating engine.
      * Used when the user switches the color-by-root selection.
+     * Does NOT fire onUpdateComplete to avoid cascading update loops.
      */
     private void recolorCells() {
         final GatingEngine.AssignmentResult result = this.lastResult;
         final CellIndex index = this.lastIndex;
         final ImageData<?> data = this.lastImageData;
         if (result == null || index == null || data == null) return;
-        Platform.runLater(() -> applyResult(result, index, data));
+        Platform.runLater(() -> applyResult(result, index, data, false));
     }
 }

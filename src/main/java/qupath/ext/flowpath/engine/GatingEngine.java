@@ -144,18 +144,20 @@ public final class GatingEngine {
         List<GateNode> roots = tree.getRoots();
         resetCounts(roots);
 
-        // Detect duplicate leaf names across roots
-        Map<String, List<Integer>> duplicates = tree.findDuplicateLeafNames();
-        if (!duplicates.isEmpty()) {
-            logger.warn("Duplicate leaf branch names across roots: {}", duplicates.keySet());
-        }
-
         // Count enabled roots to decide single vs. multi-root mode
         List<GateNode> enabledRoots = new ArrayList<>();
         for (GateNode root : roots) {
             if (root.isEnabled()) enabledRoots.add(root);
         }
         boolean multiRoot = enabledRoots.size() > 1;
+
+        // Detect duplicate leaf names only when multiple roots exist
+        if (multiRoot) {
+            Map<String, List<Integer>> duplicates = tree.findDuplicateLeafNames();
+            if (!duplicates.isEmpty()) {
+                logger.warn("Duplicate leaf branch names across roots: {}", duplicates.keySet());
+            }
+        }
 
         // Allocate per-root color arrays for multi-root mode
         List<int[]> perRootColors = null;

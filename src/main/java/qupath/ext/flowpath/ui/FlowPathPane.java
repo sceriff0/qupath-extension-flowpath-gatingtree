@@ -707,11 +707,15 @@ public class FlowPathPane extends BorderPane {
                 rootNames.add(channels.isEmpty() ? "Root" : channels.get(0));
             }
         }
+        // Skip update if items haven't changed (avoids triggering selection listeners)
+        if (rootNames.equals(colorByRootCombo.getItems())) return;
+
         int prev = colorByRootCombo.getSelectionModel().getSelectedIndex();
         colorByRootCombo.getItems().setAll(rootNames);
         if (rootNames.size() <= 1) {
             colorByRootCombo.setDisable(true);
             colorByRootCombo.getSelectionModel().clearSelection();
+            // Reset to default color mode (no-op if already -1)
             previewService.setColorRootIndex(-1);
         } else {
             colorByRootCombo.setDisable(false);
