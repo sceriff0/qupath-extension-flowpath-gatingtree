@@ -307,13 +307,57 @@ public class LivePreviewService {
     /**
      * Re-apply colors from the stored last result without re-running the gating engine.
      * Used when the user switches the color-by-root selection.
-     * Does NOT fire onUpdateComplete to avoid cascading update loops.
+     *
+     * <p>This is a standalone method rather than calling {@code applyResult} because
+     * PathClass.fromString caches by name — mutating the color via setColor() doesn't
+     * change the object reference, so the anyChanged check in applyResult would never
+     * detect a pure recolor and the hierarchy event wouldn't fire, leaving QuPath's
+     * tile cache stale.</p>
      */
     private void recolorCells() {
         final GatingEngine.AssignmentResult result = this.lastResult;
         final CellIndex index = this.lastIndex;
         final ImageData<?> data = this.lastImageData;
         if (result == null || index == null || data == null) return;
-        Platform.runLater(() -> applyResult(result, index, data, false));
+
+        Platform.runLater(() -> {
+            String[] phenotypes = result.getPhenotypes();
+            boolean[] excluded = result.getExcluded();
+            int[] defaultColors = result.getColors();
+            java.util.List<int[]> perRoot = result.getPerRootColors();
+            int n = phenotypes.length;
+            int activeRoot = this.colorRootIndex;
+
+            // Build color map and update cached PathClass colors
+            Map<String, Integer> colorByName = new HashMap<>();
+            for (int i = 0; i < n; i++) {
+                if (!excluded[i] && phenotypes[i] != null) {
+                    int color;
+                    if (activeRoot >= 0 && perRoot != null && activeRoot < perRoot.size()) {
+                        color = perRoot.get(activeRoot)[i];
+                    } else {
+                        color = defaultColors[i];
+                    }
+                    colorByName.put(phenotypes[i], color);
+                }
+            }
+
+            for (var entry : colorByName.entrySet()) {
+                int packed = entry.getValue();
+                int qupathColor = ColorUtils.toQuPathColor(packed);
+                PathClass pc = PathClass.fromString(entry.getKey(), qupathColor);
+                pc.setColor(qupathColor);
+            }
+
+            // Always fire hierarchy event — PathClass colors were mutated in-place
+            // but the object references are unchanged, so QuPath needs a manual
+            // nudge to invalidate its tile cache at all zoom levels
+            firingHierarchyEvent = true;
+            try {
+                data.getHierarchy().fireHierarchyChangedEvent(this);
+            } finally {
+                firingHierarchyEvent = false;
+            }
+        });
     }
 }
