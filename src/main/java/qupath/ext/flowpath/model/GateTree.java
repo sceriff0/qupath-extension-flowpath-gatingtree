@@ -1,7 +1,9 @@
 package qupath.ext.flowpath.model;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 public class GateTree {
 
@@ -79,5 +81,26 @@ public class GateTree {
             root.collectLeafNames(names);
         }
         return names;
+    }
+
+    /**
+     * Find leaf branch names that appear in more than one root gate.
+     *
+     * @return map from duplicate leaf name to the list of root indices where it appears;
+     *         empty if no duplicates exist
+     */
+    public Map<String, List<Integer>> findDuplicateLeafNames() {
+        Map<String, List<Integer>> nameToRoots = new LinkedHashMap<>();
+        for (int i = 0; i < roots.size(); i++) {
+            GateNode root = roots.get(i);
+            if (!root.isEnabled()) continue;
+            List<String> leafNames = new ArrayList<>();
+            root.collectLeafNames(leafNames);
+            for (String name : leafNames) {
+                nameToRoots.computeIfAbsent(name, k -> new ArrayList<>()).add(i);
+            }
+        }
+        nameToRoots.entrySet().removeIf(e -> e.getValue().size() < 2);
+        return nameToRoots;
     }
 }

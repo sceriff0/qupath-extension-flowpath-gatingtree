@@ -13,15 +13,22 @@ import qupath.ext.flowpath.model.RectangleGate;
 import qupath.lib.objects.PathObject;
 import qupath.lib.roi.interfaces.ROI;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Core gating logic that walks a {@link GateTree} and assigns phenotype labels
  * and colors to every cell in a {@link CellIndex}.
  */
 public final class GatingEngine {
+
+    private static final Logger logger = LoggerFactory.getLogger(GatingEngine.class);
 
     private GatingEngine() {
         // static utility class
@@ -34,11 +41,16 @@ public final class GatingEngine {
         private final String[] phenotypes;
         private final boolean[] excluded;
         private final int[] colors;
+        private final List<int[]> perRootColors;
+        private final List<String> rootLabels;
 
-        AssignmentResult(String[] phenotypes, boolean[] excluded, int[] colors) {
+        AssignmentResult(String[] phenotypes, boolean[] excluded, int[] colors,
+                         List<int[]> perRootColors, List<String> rootLabels) {
             this.phenotypes = phenotypes;
             this.excluded = excluded;
             this.colors = colors;
+            this.perRootColors = perRootColors;
+            this.rootLabels = rootLabels;
         }
 
         /** Phenotype label per cell, {@code null} for excluded cells. */
@@ -51,9 +63,26 @@ public final class GatingEngine {
             return excluded;
         }
 
-        /** Packed RGB color per cell, 0 for excluded cells. */
+        /** Packed RGB color per cell (default: last root's color), 0 for excluded cells. */
         public int[] getColors() {
             return colors;
+        }
+
+        /**
+         * Per-root color arrays for multi-root trees.
+         * Each entry is a {@code int[cellCount]} with that root's leaf branch colors.
+         * {@code null} when only a single enabled root exists.
+         */
+        public List<int[]> getPerRootColors() {
+            return perRootColors;
+        }
+
+        /**
+         * Names of enabled root gates, matching the order of {@link #getPerRootColors()}.
+         * {@code null} when only a single enabled root exists.
+         */
+        public List<String> getRootLabels() {
+            return rootLabels;
         }
     }
 
@@ -115,11 +144,36 @@ public final class GatingEngine {
         List<GateNode> roots = tree.getRoots();
         resetCounts(roots);
 
+        // Detect duplicate leaf names across roots
+        Map<String, List<Integer>> duplicates = tree.findDuplicateLeafNames();
+        if (!duplicates.isEmpty()) {
+            logger.warn("Duplicate leaf branch names across roots: {}", duplicates.keySet());
+        }
+
+        // Count enabled roots to decide single vs. multi-root mode
+        List<GateNode> enabledRoots = new ArrayList<>();
+        for (GateNode root : roots) {
+            if (root.isEnabled()) enabledRoots.add(root);
+        }
+        boolean multiRoot = enabledRoots.size() > 1;
+
+        // Allocate per-root color arrays for multi-root mode
+        List<int[]> perRootColors = null;
+        List<String> rootLabels = null;
+        if (multiRoot) {
+            perRootColors = new ArrayList<>();
+            rootLabels = new ArrayList<>();
+            for (GateNode root : enabledRoots) {
+                perRootColors.add(new int[n]);
+                rootLabels.add(root.getChannels().isEmpty() ? "Root" : root.getChannels().get(0));
+            }
+        }
+
         for (int i = 0; i < n; i++) {
             if (excluded[i]) {
                 continue;
             }
-            walkRoots(roots, i, index, stats, phenotypes, excluded, colors);
+            walkRoots(roots, i, index, stats, phenotypes, excluded, colors, perRootColors);
         }
 
         // Null out phenotypes for cells that got excluded during outlier checks
@@ -127,10 +181,15 @@ public final class GatingEngine {
             if (excluded[i]) {
                 phenotypes[i] = null;
                 colors[i] = 0;
+                if (perRootColors != null) {
+                    for (int[] rootColors : perRootColors) {
+                        rootColors[i] = 0;
+                    }
+                }
             }
         }
 
-        return new AssignmentResult(phenotypes, excluded, colors);
+        return new AssignmentResult(phenotypes, excluded, colors, perRootColors, rootLabels);
     }
 
     /**
@@ -367,12 +426,58 @@ public final class GatingEngine {
 
     private static void walkRoots(List<GateNode> roots, int cellIdx,
                                   CellIndex index, MarkerStats stats,
-                                  String[] phenotypes, boolean[] excluded, int[] colors) {
-        for (GateNode root : roots) {
-            if (excluded[cellIdx]) {
-                return;
+                                  String[] phenotypes, boolean[] excluded, int[] colors,
+                                  List<int[]> perRootColors) {
+        if (perRootColors == null) {
+            // Single-root fast path — original behavior
+            for (GateNode root : roots) {
+                if (excluded[cellIdx]) return;
+                walkNode(root, cellIdx, index, stats, phenotypes, excluded, colors);
             }
+            return;
+        }
+
+        // Multi-root: collect per-root phenotypes, then build composite
+        List<String> contributions = new ArrayList<>();
+        List<Integer> contributedColors = new ArrayList<>();
+        int enabledIdx = 0;
+
+        for (GateNode root : roots) {
+            if (excluded[cellIdx]) return;
+            if (!root.isEnabled()) continue;
+
+            // Clean slate for this root's walk
+            phenotypes[cellIdx] = "Unclassified";
+            colors[cellIdx] = 0;
+
             walkNode(root, cellIdx, index, stats, phenotypes, excluded, colors);
+
+            // If cell got excluded during this root (outlier), stop entirely
+            if (excluded[cellIdx]) return;
+
+            // Capture this root's per-cell color
+            perRootColors.get(enabledIdx)[cellIdx] = colors[cellIdx];
+
+            // Collect non-Unclassified phenotypes for composite
+            String rootPheno = phenotypes[cellIdx];
+            if (rootPheno != null && !"Unclassified".equals(rootPheno)) {
+                contributions.add(rootPheno);
+                contributedColors.add(colors[cellIdx]);
+            }
+            enabledIdx++;
+        }
+
+        // Build composite phenotype using QuPath derived PathClass separator ": "
+        if (contributions.isEmpty()) {
+            phenotypes[cellIdx] = "Unclassified";
+            colors[cellIdx] = 0;
+        } else if (contributions.size() == 1) {
+            phenotypes[cellIdx] = contributions.get(0);
+            colors[cellIdx] = contributedColors.get(0);
+        } else {
+            phenotypes[cellIdx] = String.join(": ", contributions);
+            // Default color: last contributing root
+            colors[cellIdx] = contributedColors.get(contributedColors.size() - 1);
         }
     }
 

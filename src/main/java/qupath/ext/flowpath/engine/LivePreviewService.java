@@ -48,6 +48,14 @@ public class LivePreviewService {
     /** Count of excluded cells from the most recent gating run (updated on FX thread). */
     private int lastExcludedCount;
 
+    /** Which enabled root's colors to display (-1 = default/last root). */
+    private volatile int colorRootIndex = -1;
+
+    /** Cached last result for lightweight recoloring without re-gating. */
+    private volatile GatingEngine.AssignmentResult lastResult;
+    private volatile CellIndex lastIndex;
+    private volatile ImageData<?> lastImageData;
+
     /**
      * Guard flag set while {@link #applyResult} is firing a hierarchy changed event.
      * Listeners can check {@link #isFiringHierarchyEvent()} to avoid reacting to
@@ -105,6 +113,20 @@ public class LivePreviewService {
 
     public int getLastExcludedCount() {
         return lastExcludedCount;
+    }
+
+    /**
+     * Set which enabled root's colors to display.
+     * Use -1 for default (last root's color).
+     * Triggers an immediate recolor without re-running the gating engine.
+     */
+    public void setColorRootIndex(int index) {
+        this.colorRootIndex = index;
+        recolorCells();
+    }
+
+    public int getColorRootIndex() {
+        return colorRootIndex;
     }
 
     /**
@@ -204,9 +226,15 @@ public class LivePreviewService {
     }
 
     private void applyResult(GatingEngine.AssignmentResult result, CellIndex index, ImageData<?> data) {
+        // Cache for lightweight recoloring
+        this.lastResult = result;
+        this.lastIndex = index;
+        this.lastImageData = data;
+
         String[] phenotypes = result.getPhenotypes();
         boolean[] excluded = result.getExcluded();
-        int[] colors = result.getColors();
+        int[] defaultColors = result.getColors();
+        java.util.List<int[]> perRoot = result.getPerRootColors();
         int n = phenotypes.length;
 
         // Count total excluded cells for status display
@@ -216,12 +244,19 @@ public class LivePreviewService {
 
         Map<String, PathClass> classCache = new HashMap<>();
 
-        // Build cache and force-update colors (PathClass.fromString caches globally by name,
-        // so we must explicitly set the color each time to reflect user changes)
+        // Build cache and force-update colors.
+        // When a specific root is selected, use that root's per-cell colors instead of the default.
+        int activeRoot = this.colorRootIndex;
         Map<String, Integer> colorByName = new HashMap<>();
         for (int i = 0; i < n; i++) {
             if (!excluded[i] && phenotypes[i] != null) {
-                colorByName.put(phenotypes[i], colors[i]);
+                int color;
+                if (activeRoot >= 0 && perRoot != null && activeRoot < perRoot.size()) {
+                    color = perRoot.get(activeRoot)[i];
+                } else {
+                    color = defaultColors[i];
+                }
+                colorByName.put(phenotypes[i], color);
             }
         }
         for (var entry : colorByName.entrySet()) {
@@ -264,5 +299,17 @@ public class LivePreviewService {
         if (onUpdateComplete != null) {
             onUpdateComplete.run();
         }
+    }
+
+    /**
+     * Re-apply colors from the stored last result without re-running the gating engine.
+     * Used when the user switches the color-by-root selection.
+     */
+    private void recolorCells() {
+        final GatingEngine.AssignmentResult result = this.lastResult;
+        final CellIndex index = this.lastIndex;
+        final ImageData<?> data = this.lastImageData;
+        if (result == null || index == null || data == null) return;
+        Platform.runLater(() -> applyResult(result, index, data));
     }
 }

@@ -566,4 +566,44 @@ class EndToEndGatingCsvTest {
         assertEquals(outsideName, csv.cellValue(3, "phenotype"));
         assertEquals(insideName, csv.cellValue(4, "phenotype"));
     }
+
+    // ========== Test: Two enabled roots produce composite phenotype in CSV ==========
+
+    @Test
+    void twoRootsCompositePhenotypeInCsv() throws IOException {
+        // Root1: CD45 threshold=5, Root2: PANCK threshold=5
+        // Cell 0: CD45=8, PANCK=8  -> "CD45+: PANCK+"
+        // Cell 1: CD45=8, PANCK=2  -> "CD45+: PANCK-"
+        // Cell 2: CD45=2, PANCK=8  -> "CD45-: PANCK+"
+        List<String> markers = List.of("CD45", "PANCK");
+        double[][] values = { {8, 8, 2}, {8, 2, 8} };
+        CellIndex index = buildIndex(markers, values, null);
+        MarkerStats stats = MarkerStats.compute(index, allTrueMask(3));
+
+        GateNode root1 = new GateNode("CD45", 5.0);
+        root1.setThresholdIsZScore(false);
+        GateNode root2 = new GateNode("PANCK", 5.0);
+        root2.setThresholdIsZScore(false);
+
+        GateTree tree = new GateTree();
+        tree.setQualityFilter(null);
+        tree.addRoot(root1);
+        tree.addRoot(root2);
+
+        CsvResult csv = runPipeline(tree, index, stats, "composite.csv");
+        assertEquals(3, csv.rows.size());
+
+        // Verify composite phenotype format
+        assertEquals("CD45+: PANCK+", csv.cellValue(0, "phenotype"));
+        assertEquals("CD45+: PANCK-", csv.cellValue(1, "phenotype"));
+        assertEquals("CD45-: PANCK+", csv.cellValue(2, "phenotype"));
+
+        // Verify sign columns from BOTH roots are populated
+        assertEquals("+", csv.cellValue(0, "CD45_sign"));
+        assertEquals("+", csv.cellValue(0, "PANCK_sign"));
+        assertEquals("+", csv.cellValue(1, "CD45_sign"));
+        assertEquals("-", csv.cellValue(1, "PANCK_sign"));
+        assertEquals("-", csv.cellValue(2, "CD45_sign"));
+        assertEquals("+", csv.cellValue(2, "PANCK_sign"));
+    }
 }

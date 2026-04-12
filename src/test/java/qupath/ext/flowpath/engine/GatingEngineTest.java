@@ -539,4 +539,191 @@ class GatingEngineTest {
             assertTrue(mask[i], "Cell " + i + " should reach child (parent disabled)");
         }
     }
+
+    // ---- multi-root composite phenotype tests ----
+
+    @Test
+    void twoEnabledRootsProduceCompositePhenotype() {
+        // CD45 threshold=5, PANCK threshold=5
+        // Cell 0: CD45=8, PANCK=8  -> CD45+: PANCK+
+        // Cell 1: CD45=8, PANCK=2  -> CD45+: PANCK-
+        // Cell 2: CD45=2, PANCK=8  -> CD45-: PANCK+
+        // Cell 3: CD45=2, PANCK=2  -> CD45-: PANCK-
+        List<String> markers = List.of("CD45", "PANCK");
+        double[][] values = { {8, 8, 2, 2}, {8, 2, 8, 2} };
+        CellIndex index = buildIndex(markers, values, null);
+        MarkerStats stats = MarkerStats.compute(index, allTrueMask(4));
+
+        GateNode root1 = new GateNode("CD45", 5.0);
+        root1.setThresholdIsZScore(false);
+        GateNode root2 = new GateNode("PANCK", 5.0);
+        root2.setThresholdIsZScore(false);
+
+        GateTree tree = new GateTree();
+        tree.setQualityFilter(null);
+        tree.addRoot(root1);
+        tree.addRoot(root2);
+
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
+        String[] phenos = result.getPhenotypes();
+
+        assertEquals("CD45+: PANCK+", phenos[0]);
+        assertEquals("CD45+: PANCK-", phenos[1]);
+        assertEquals("CD45-: PANCK+", phenos[2]);
+        assertEquals("CD45-: PANCK-", phenos[3]);
+
+        // perRootColors and rootLabels should be populated
+        assertNotNull(result.getPerRootColors());
+        assertEquals(2, result.getPerRootColors().size());
+        assertNotNull(result.getRootLabels());
+        assertEquals(List.of("CD45", "PANCK"), result.getRootLabels());
+    }
+
+    @Test
+    void perRootColorsStoredCorrectly() {
+        List<String> markers = List.of("CD45", "PANCK");
+        double[][] values = { {8, 2}, {8, 2} };
+        CellIndex index = buildIndex(markers, values, null);
+        MarkerStats stats = MarkerStats.compute(index, allTrueMask(2));
+
+        GateNode root1 = new GateNode("CD45", 5.0);
+        root1.setThresholdIsZScore(false);
+        // Set known colors
+        int red = (255 << 16);
+        int blue = 255;
+        root1.getBranches().get(0).setColor(red);   // CD45+ = red
+        root1.getBranches().get(1).setColor(blue);   // CD45- = blue
+
+        GateNode root2 = new GateNode("PANCK", 5.0);
+        root2.setThresholdIsZScore(false);
+        int green = (255 << 8);
+        int gray = (128 << 16) | (128 << 8) | 128;
+        root2.getBranches().get(0).setColor(green);  // PANCK+ = green
+        root2.getBranches().get(1).setColor(gray);   // PANCK- = gray
+
+        GateTree tree = new GateTree();
+        tree.setQualityFilter(null);
+        tree.addRoot(root1);
+        tree.addRoot(root2);
+
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
+
+        // Cell 0: CD45+=red, PANCK+=green
+        assertEquals(red, result.getPerRootColors().get(0)[0]);
+        assertEquals(green, result.getPerRootColors().get(1)[0]);
+        // Default color should be last root's (PANCK+)
+        assertEquals(green, result.getColors()[0]);
+
+        // Cell 1: CD45-=blue, PANCK-=gray
+        assertEquals(blue, result.getPerRootColors().get(0)[1]);
+        assertEquals(gray, result.getPerRootColors().get(1)[1]);
+        assertEquals(gray, result.getColors()[1]);
+    }
+
+    @Test
+    void singleRootBehaviorUnchanged() {
+        List<String> markers = List.of("CD45");
+        double[][] values = { {8, 2} };
+        CellIndex index = buildIndex(markers, values, null);
+        MarkerStats stats = MarkerStats.compute(index, allTrueMask(2));
+
+        GateNode root = new GateNode("CD45", 5.0);
+        root.setThresholdIsZScore(false);
+
+        GateTree tree = new GateTree();
+        tree.setQualityFilter(null);
+        tree.addRoot(root);
+
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
+        assertEquals("CD45+", result.getPhenotypes()[0]);
+        assertEquals("CD45-", result.getPhenotypes()[1]);
+        // No perRootColors for single root
+        assertNull(result.getPerRootColors());
+        assertNull(result.getRootLabels());
+    }
+
+    @Test
+    void disabledRootSkippedInComposite() {
+        List<String> markers = List.of("CD45", "PANCK");
+        double[][] values = { {8}, {8} };
+        CellIndex index = buildIndex(markers, values, null);
+        MarkerStats stats = MarkerStats.compute(index, allTrueMask(1));
+
+        GateNode root1 = new GateNode("CD45", 5.0);
+        root1.setThresholdIsZScore(false);
+        GateNode root2 = new GateNode("PANCK", 5.0);
+        root2.setThresholdIsZScore(false);
+        root2.setEnabled(false);
+
+        GateTree tree = new GateTree();
+        tree.setQualityFilter(null);
+        tree.addRoot(root1);
+        tree.addRoot(root2);
+
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
+        // Only one enabled root → simple phenotype, no composite
+        assertEquals("CD45+", result.getPhenotypes()[0]);
+        assertNull(result.getPerRootColors());
+    }
+
+    @Test
+    void threeRootsProduceTripleComposite() {
+        List<String> markers = List.of("A", "B", "C");
+        double[][] values = { {8}, {2}, {8} };
+        CellIndex index = buildIndex(markers, values, null);
+        MarkerStats stats = MarkerStats.compute(index, allTrueMask(1));
+
+        GateNode r1 = new GateNode("A", 5.0);
+        r1.setThresholdIsZScore(false);
+        GateNode r2 = new GateNode("B", 5.0);
+        r2.setThresholdIsZScore(false);
+        GateNode r3 = new GateNode("C", 5.0);
+        r3.setThresholdIsZScore(false);
+
+        GateTree tree = new GateTree();
+        tree.setQualityFilter(null);
+        tree.addRoot(r1);
+        tree.addRoot(r2);
+        tree.addRoot(r3);
+
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
+        assertEquals("A+: B-: C+", result.getPhenotypes()[0]);
+        assertEquals(3, result.getPerRootColors().size());
+        assertEquals(List.of("A", "B", "C"), result.getRootLabels());
+    }
+
+    @Test
+    void exclusionInFirstRootSkipsSecond() {
+        List<String> markers = List.of("CD45", "PANCK");
+        // 5 cells: cell 0 is an extreme outlier on CD45
+        // Other cells provide range for percentile calculation
+        double[][] values = {
+            {-500, 5, 6, 7, 8},  // CD45: cell 0 is far outside p1-p99
+            {8, 8, 8, 8, 8}      // PANCK: all high
+        };
+        CellIndex index = buildIndex(markers, values, null);
+        MarkerStats stats = MarkerStats.compute(index, allTrueMask(5));
+
+        GateNode root1 = new GateNode("CD45", 5.0);
+        root1.setThresholdIsZScore(false);
+        root1.setExcludeOutliers(true);
+        root1.setClipPercentileLow(1.0);
+        root1.setClipPercentileHigh(99.0);
+
+        GateNode root2 = new GateNode("PANCK", 5.0);
+        root2.setThresholdIsZScore(false);
+
+        GateTree tree = new GateTree();
+        tree.setQualityFilter(null);
+        tree.addRoot(root1);
+        tree.addRoot(root2);
+
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
+        // Cell 0 should be excluded by root1's outlier check
+        assertTrue(result.getExcluded()[0]);
+        assertNull(result.getPhenotypes()[0]);
+        // Cell 1 should have composite phenotype (not excluded)
+        assertFalse(result.getExcluded()[1]);
+        assertTrue(result.getPhenotypes()[1].contains(": "));
+    }
 }

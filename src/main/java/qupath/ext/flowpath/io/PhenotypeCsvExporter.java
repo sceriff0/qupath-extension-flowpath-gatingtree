@@ -94,7 +94,7 @@ public class PhenotypeCsvExporter {
                 writer.write(',' + fmt(index.getSolidity(i)));
 
                 // Per marker: raw, zscore, sign
-                Map<String, String> signs = phenotypeMarkerSigns.get(phenotype);
+                Map<String, String> signs = resolveCompositeSigns(phenotype, phenotypeMarkerSigns);
 
                 for (String marker : markerColumns) {
                     int mIdx = index.getMarkerIndex(marker);
@@ -116,6 +116,28 @@ public class PhenotypeCsvExporter {
                 writer.newLine();
             }
         }
+    }
+
+    /**
+     * Resolve marker signs for a phenotype, handling composite (derived) phenotypes.
+     * Composite phenotypes use ": " as separator (QuPath derived PathClass format).
+     * For composites, sign maps from each component are merged.
+     */
+    private static Map<String, String> resolveCompositeSigns(String phenotype,
+                                                              Map<String, Map<String, String>> signMap) {
+        // Fast path: direct lookup (single root, or quadrant gate with "/" in name)
+        Map<String, String> direct = signMap.get(phenotype);
+        if (direct != null) return direct;
+
+        // Composite: split by ": " and merge sign maps from each component
+        if (!phenotype.contains(": ")) return null;
+        String[] parts = phenotype.split(": ");
+        Map<String, String> merged = new LinkedHashMap<>();
+        for (String part : parts) {
+            Map<String, String> partSigns = signMap.get(part);
+            if (partSigns != null) merged.putAll(partSigns);
+        }
+        return merged.isEmpty() ? null : merged;
     }
 
     /** Format a double for CSV; NaN → empty string. Uses US locale to ensure dot decimal separator. */

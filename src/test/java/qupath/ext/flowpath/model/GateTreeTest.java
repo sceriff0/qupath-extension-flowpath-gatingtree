@@ -2,6 +2,7 @@ package qupath.ext.flowpath.model;
 
 import org.junit.jupiter.api.Test;
 import java.util.List;
+import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class GateTreeTest {
@@ -83,5 +84,28 @@ class GateTreeTest {
     void defaultQualityFilterIsPresent() {
         var tree = new GateTree();
         assertNotNull(tree.getQualityFilter());
+    }
+
+    @Test
+    void findDuplicateLeafNamesDetectsCollision() {
+        var tree = new GateTree();
+        // Both roots have a branch named "CD45+"
+        tree.addRoot(new GateNode("CD45"));
+        tree.addRoot(new GateNode("CD45"));
+
+        Map<String, List<Integer>> dupes = tree.findDuplicateLeafNames();
+        assertTrue(dupes.containsKey("CD45+"));
+        assertTrue(dupes.containsKey("CD45-"));
+        assertEquals(List.of(0, 1), dupes.get("CD45+"));
+    }
+
+    @Test
+    void findDuplicateLeafNamesNoDuplicates() {
+        var tree = new GateTree();
+        tree.addRoot(new GateNode("CD45"));
+        tree.addRoot(new GateNode("PANCK"));
+
+        Map<String, List<Integer>> dupes = tree.findDuplicateLeafNames();
+        assertTrue(dupes.isEmpty());
     }
 }

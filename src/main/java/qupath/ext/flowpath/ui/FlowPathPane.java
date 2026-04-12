@@ -52,6 +52,7 @@ public class FlowPathPane extends BorderPane {
     private final CheckBox roiFilterCheckBox;
     private final LivePreviewService previewService;
     private final Label statusBar;
+    private final ComboBox<String> colorByRootCombo;
 
     private static final int MAX_UNDO = 50;
     private final Deque<GateTree> undoStack = new ArrayDeque<>();
@@ -109,7 +110,19 @@ public class FlowPathPane extends BorderPane {
         qualityFilterPane = new QualityFilterPane(gateTree.getQualityFilter());
         qualityFilterPane.setOnFilterChanged(filter -> onQualityFilterChanged());
 
-        HBox treeToolbar = new HBox(4, addRootBtn);
+        // Color-by-root selector (for multi-root trees)
+        colorByRootCombo = new ComboBox<>();
+        colorByRootCombo.setPromptText("Color by...");
+        colorByRootCombo.setMaxWidth(120);
+        colorByRootCombo.setDisable(true);
+        colorByRootCombo.setTooltip(new Tooltip("Choose which root gate's colors to display"));
+        colorByRootCombo.getSelectionModel().selectedIndexProperty().addListener((obs, old, idx) -> {
+            if (idx.intValue() >= 0) {
+                previewService.setColorRootIndex(idx.intValue());
+            }
+        });
+
+        HBox treeToolbar = new HBox(4, addRootBtn, colorByRootCombo);
         HBox.setHgrow(addRootBtn, Priority.ALWAYS);
 
         VBox leftPane = new VBox(4, treeView, treeToolbar, roiFilterCheckBox, qualityFilterPane);
@@ -683,6 +696,29 @@ public class FlowPathPane extends BorderPane {
         // Already on FX thread (called from Platform.runLater in the constructor callback)
         treeView.refresh();
         updateStatusBar();
+        refreshColorByRootCombo();
+    }
+
+    private void refreshColorByRootCombo() {
+        List<String> rootNames = new ArrayList<>();
+        for (GateNode root : gateTree.getRoots()) {
+            if (root.isEnabled()) {
+                List<String> channels = root.getChannels();
+                rootNames.add(channels.isEmpty() ? "Root" : channels.get(0));
+            }
+        }
+        int prev = colorByRootCombo.getSelectionModel().getSelectedIndex();
+        colorByRootCombo.getItems().setAll(rootNames);
+        if (rootNames.size() <= 1) {
+            colorByRootCombo.setDisable(true);
+            colorByRootCombo.getSelectionModel().clearSelection();
+            previewService.setColorRootIndex(-1);
+        } else {
+            colorByRootCombo.setDisable(false);
+            if (prev >= 0 && prev < rootNames.size()) {
+                colorByRootCombo.getSelectionModel().select(prev);
+            }
+        }
     }
 
     private void updateStatusBar() {
