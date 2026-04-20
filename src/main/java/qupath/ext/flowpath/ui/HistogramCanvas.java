@@ -29,6 +29,10 @@ public class HistogramCanvas extends Canvas {
     private Color posColor = Color.rgb(0, 200, 0);
     private Color negColor = Color.rgb(160, 160, 160);
     private double maxCount;
+    // Number of values passed to setData before any clip/bin logic.
+    // Used to distinguish "truly empty" from "all values outside clip range"
+    // when rendering the empty-histogram message.
+    private int inputCount;
 
     private int posCount = -1;
     private int negCount = -1;
@@ -95,6 +99,7 @@ public class HistogramCanvas extends Canvas {
      * Set histogram data with display range (clipped by percentiles).
      */
     public void setData(double[] rawValues, double clipMin, double clipMax) {
+        this.inputCount = rawValues == null ? 0 : rawValues.length;
         if (rawValues == null || rawValues.length == 0) {
             binEdges = null;
             binCounts = null;
@@ -179,7 +184,17 @@ public class HistogramCanvas extends Canvas {
         if (binEdges == null || binCounts == null || maxCount <= 0) {
             gc.setFill(Color.gray(0.5));
             gc.setFont(Font.font(12));
-            gc.fillText("No data", w / 2 - 20, h / 2);
+            if (inputCount > 0) {
+                // Data exists but every value fell outside the current clip range
+                // (common after cascaded threshold gates with narrow distributions).
+                // Report the true cell count so the user isn't misled into thinking
+                // the branch is empty — the stats panel and CSV remain authoritative.
+                String msg = String.format("%,d cells outside clip range", inputCount);
+                double approxW = msg.length() * 6.5;
+                gc.fillText(msg, Math.max(4, w / 2 - approxW / 2), h / 2);
+            } else {
+                gc.fillText("No data", w / 2 - 20, h / 2);
+            }
             return;
         }
 

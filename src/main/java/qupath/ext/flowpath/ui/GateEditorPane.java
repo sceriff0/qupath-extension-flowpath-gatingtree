@@ -1059,17 +1059,30 @@ public class GateEditorPane extends VBox {
         if (markerIdx < 0) return;
 
         double[] allValues = cellIndex.getMarkerValues(markerIdx);
-        // Filter by ROI mask and ancestor mask
+        // Filter by ROI mask and ancestor mask, excluding NaN channel values
+        // so downstream percentile/clip logic cannot produce NaN bounds.
         boolean hasMask = roiMask != null || ancestorMask != null;
         double[] rawValues;
         if (hasMask) {
             int count = 0;
-            for (int i = 0; i < allValues.length; i++) if (passesMasks(i)) count++;
+            for (int i = 0; i < allValues.length; i++) {
+                if (passesMasks(i) && !Double.isNaN(allValues[i])) count++;
+            }
             rawValues = new double[count];
             int j = 0;
-            for (int i = 0; i < allValues.length; i++) if (passesMasks(i)) rawValues[j++] = allValues[i];
+            for (int i = 0; i < allValues.length; i++) {
+                if (passesMasks(i) && !Double.isNaN(allValues[i])) rawValues[j++] = allValues[i];
+            }
         } else {
-            rawValues = allValues;
+            int count = 0;
+            for (double v : allValues) if (!Double.isNaN(v)) count++;
+            if (count == allValues.length) {
+                rawValues = allValues;
+            } else {
+                rawValues = new double[count];
+                int j = 0;
+                for (double v : allValues) if (!Double.isNaN(v)) rawValues[j++] = v;
+            }
         }
         boolean useZ = currentNode.isThresholdIsZScore();
 
@@ -1087,8 +1100,27 @@ public class GateEditorPane extends VBox {
 
         double[] sorted = displayValues.clone();
         java.util.Arrays.sort(sorted);
-        double clipMin = percentile(sorted, currentNode.getClipPercentileLow());
-        double clipMax = percentile(sorted, currentNode.getClipPercentileHigh());
+        double clipLo = percentile(sorted, currentNode.getClipPercentileLow());
+        double clipHi = percentile(sorted, currentNode.getClipPercentileHigh());
+
+        // Guard against degenerate clip ranges that would leave every bin empty
+        // (narrow distributions after cascaded threshold gates, or stale clip
+        // percentiles inherited from an earlier population). Fall back to the
+        // actual data range so the histogram remains informative instead of
+        // rendering the misleading "No data" message while cells exist.
+        if (displayValues.length > 0) {
+            double dataMin = sorted[0];
+            double dataMax = sorted[sorted.length - 1];
+            boolean degenerate = !(clipHi > clipLo)
+                    || Double.isNaN(clipLo) || Double.isNaN(clipHi)
+                    || dataMax < clipLo || dataMin > clipHi;
+            if (degenerate) {
+                clipLo = dataMin;
+                clipHi = dataMax > dataMin ? dataMax : dataMin + 1;
+            }
+        }
+        final double clipMin = clipLo;
+        final double clipMax = clipHi;
 
         currentHistogram.setData(displayValues, clipMin, clipMax);
         currentHistogram.setThreshold(currentNode.getThreshold());
