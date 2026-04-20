@@ -40,27 +40,50 @@ public final class GatingEngine {
     public static final class AssignmentResult {
         private final String[] phenotypes;
         private final boolean[] excluded;
+        private final boolean[] outOfAnnotation;
+        private final boolean[] outlier;
         private final int[] colors;
         private final List<int[]> perRootColors;
         private final List<String> rootLabels;
 
-        AssignmentResult(String[] phenotypes, boolean[] excluded, int[] colors,
+        AssignmentResult(String[] phenotypes, boolean[] excluded,
+                         boolean[] outOfAnnotation, boolean[] outlier,
+                         int[] colors,
                          List<int[]> perRootColors, List<String> rootLabels) {
             this.phenotypes = phenotypes;
             this.excluded = excluded;
+            this.outOfAnnotation = outOfAnnotation;
+            this.outlier = outlier;
             this.colors = colors;
             this.perRootColors = perRootColors;
             this.rootLabels = rootLabels;
         }
 
-        /** Phenotype label per cell, {@code null} for excluded cells. */
+        /**
+         * Phenotype label per cell. Always populated (never {@code null}) — excluded cells
+         * still receive the phenotype they would have been assigned if not excluded.
+         * Visual filtering in QuPath is driven by {@link #getExcluded()}.
+         */
         public String[] getPhenotypes() {
             return phenotypes;
         }
 
-        /** {@code true} for cells removed by the quality filter or outlier exclusion. */
+        /** {@code true} for cells removed by ROI mask, quality filter, or outlier exclusion. */
         public boolean[] getExcluded() {
             return excluded;
+        }
+
+        /** {@code true} for cells that fell outside the ROI annotation mask. */
+        public boolean[] getOutOfAnnotation() {
+            return outOfAnnotation;
+        }
+
+        /**
+         * {@code true} for cells rejected by the quality filter or by a gate's
+         * per-channel percentile clipping.
+         */
+        public boolean[] getOutlier() {
+            return outlier;
         }
 
         /** Packed RGB color per cell (default: last root's color), 0 for excluded cells. */
@@ -110,6 +133,8 @@ public final class GatingEngine {
         int n = index.size();
         String[] phenotypes = new String[n];
         boolean[] excluded = new boolean[n];
+        boolean[] outOfAnnotation = new boolean[n];
+        boolean[] outlier = new boolean[n];
         int[] colors = new int[n];
 
         // 1. Initialize all as Unclassified
@@ -117,24 +142,24 @@ public final class GatingEngine {
             phenotypes[i] = "Unclassified";
         }
 
-        // 2. Apply quality filter
+        // 2. Apply quality filter — flag as outlier but keep phenotype computation going
         QualityFilter qf = tree.getQualityFilter();
         if (qf != null) {
             for (int i = 0; i < n; i++) {
                 if (!qf.passes(index.getArea(i), index.getEccentricity(i),
                         index.getSolidity(i), index.getTotalIntensity(i), index.getPerimeter(i))) {
+                    outlier[i] = true;
                     excluded[i] = true;
-                    phenotypes[i] = null;
                 }
             }
         }
 
-        // 2b. Apply ROI mask
+        // 2b. Apply ROI mask — cells outside the annotation are flagged but still walked
         if (roiMask != null) {
             for (int i = 0; i < n; i++) {
                 if (!roiMask[i]) {
+                    outOfAnnotation[i] = true;
                     excluded[i] = true;
-                    phenotypes[i] = null;
                 }
             }
         }
@@ -171,27 +196,15 @@ public final class GatingEngine {
             }
         }
 
+        // Walk every cell — excluded cells still get their would-have-been phenotype
+        // for CSV export; branch counts skip increments when excluded[i] is true so the
+        // visible counts in the UI continue to reflect non-excluded cells only.
         for (int i = 0; i < n; i++) {
-            if (excluded[i]) {
-                continue;
-            }
-            walkRoots(roots, i, index, stats, phenotypes, excluded, colors, perRootColors);
+            walkRoots(roots, i, index, stats, phenotypes, excluded, outlier, colors, perRootColors);
         }
 
-        // Null out phenotypes for cells that got excluded during outlier checks
-        for (int i = 0; i < n; i++) {
-            if (excluded[i]) {
-                phenotypes[i] = null;
-                colors[i] = 0;
-                if (perRootColors != null) {
-                    for (int[] rootColors : perRootColors) {
-                        rootColors[i] = 0;
-                    }
-                }
-            }
-        }
-
-        return new AssignmentResult(phenotypes, excluded, colors, perRootColors, rootLabels);
+        return new AssignmentResult(phenotypes, excluded, outOfAnnotation, outlier,
+                colors, perRootColors, rootLabels);
     }
 
     /**
@@ -428,13 +441,14 @@ public final class GatingEngine {
 
     private static void walkRoots(List<GateNode> roots, int cellIdx,
                                   CellIndex index, MarkerStats stats,
-                                  String[] phenotypes, boolean[] excluded, int[] colors,
-                                  List<int[]> perRootColors) {
+                                  String[] phenotypes, boolean[] excluded, boolean[] outlier,
+                                  int[] colors, List<int[]> perRootColors) {
         if (perRootColors == null) {
-            // Single-root fast path — original behavior
+            // Single-root fast path — walk all roots regardless of exclusion so excluded
+            // cells still get a phenotype for CSV. Count increments inside walkNode are
+            // guarded by excluded[] to keep UI counts consistent.
             for (GateNode root : roots) {
-                if (excluded[cellIdx]) return;
-                walkNode(root, cellIdx, index, stats, phenotypes, excluded, colors);
+                walkNode(root, cellIdx, index, stats, phenotypes, excluded, outlier, colors);
             }
             return;
         }
@@ -445,17 +459,13 @@ public final class GatingEngine {
         int enabledIdx = 0;
 
         for (GateNode root : roots) {
-            if (excluded[cellIdx]) return;
             if (!root.isEnabled()) continue;
 
             // Clean slate for this root's walk
             phenotypes[cellIdx] = "Unclassified";
             colors[cellIdx] = 0;
 
-            walkNode(root, cellIdx, index, stats, phenotypes, excluded, colors);
-
-            // If cell got excluded during this root (outlier), stop entirely
-            if (excluded[cellIdx]) return;
+            walkNode(root, cellIdx, index, stats, phenotypes, excluded, outlier, colors);
 
             // Capture this root's per-cell color
             perRootColors.get(enabledIdx)[cellIdx] = colors[cellIdx];
@@ -485,20 +495,21 @@ public final class GatingEngine {
 
     private static void walkNode(GateNode node, int cellIdx,
                                  CellIndex index, MarkerStats stats,
-                                 String[] phenotypes, boolean[] excluded, int[] colors) {
+                                 String[] phenotypes, boolean[] excluded, boolean[] outlier, int[] colors) {
         if (!node.isEnabled()) return;
         if (node instanceof QuadrantGate qg) {
-            walkQuadrantNode(qg, cellIdx, index, stats, phenotypes, excluded, colors);
+            walkQuadrantNode(qg, cellIdx, index, stats, phenotypes, excluded, outlier, colors);
         } else if (node instanceof PolygonGate || node instanceof RectangleGate || node instanceof EllipseGate) {
-            walk2DNode(node, cellIdx, index, stats, phenotypes, excluded, colors);
+            walk2DNode(node, cellIdx, index, stats, phenotypes, excluded, outlier, colors);
         } else {
-            walkThresholdNode(node, cellIdx, index, stats, phenotypes, excluded, colors);
+            walkThresholdNode(node, cellIdx, index, stats, phenotypes, excluded, outlier, colors);
         }
     }
 
     private static void walkThresholdNode(GateNode node, int cellIdx,
                                            CellIndex index, MarkerStats stats,
-                                           String[] phenotypes, boolean[] excluded, int[] colors) {
+                                           String[] phenotypes, boolean[] excluded, boolean[] outlier,
+                                           int[] colors) {
         String channel = node.getChannel();
         int markerIdx = index.getMarkerIndex(channel);
         if (markerIdx < 0) {
@@ -507,13 +518,14 @@ public final class GatingEngine {
 
         double rawValue = index.getMarkerValues(markerIdx)[cellIdx];
 
-        // Outlier exclusion based on percentile clip bounds
+        // Outlier exclusion based on percentile clip bounds — flag but continue walking so
+        // the CSV still receives a phenotype for this cell.
         if (node.isExcludeOutliers()) {
             double lo = stats.getPercentileValue(channel, node.getClipPercentileLow());
             double hi = stats.getPercentileValue(channel, node.getClipPercentileHigh());
             if (!Double.isNaN(lo) && !Double.isNaN(hi) && (rawValue < lo || rawValue > hi)) {
+                outlier[cellIdx] = true;
                 excluded[cellIdx] = true;
-                return;
             }
         }
 
@@ -528,13 +540,16 @@ public final class GatingEngine {
         } else {
             branch = node.getBranches().get(1); // negative
         }
-        branch.setCount(branch.getCount() + 1);
-        assignBranch(branch, cellIdx, index, stats, phenotypes, excluded, colors);
+        if (!excluded[cellIdx]) {
+            branch.setCount(branch.getCount() + 1);
+        }
+        assignBranch(branch, cellIdx, index, stats, phenotypes, excluded, outlier, colors);
     }
 
     private static void walkQuadrantNode(QuadrantGate gate, int cellIdx,
                                           CellIndex index, MarkerStats stats,
-                                          String[] phenotypes, boolean[] excluded, int[] colors) {
+                                          String[] phenotypes, boolean[] excluded, boolean[] outlier,
+                                          int[] colors) {
         int markerIdxX = index.getMarkerIndex(gate.getChannelX());
         int markerIdxY = index.getMarkerIndex(gate.getChannelY());
         if (markerIdxX < 0 || markerIdxY < 0) {
@@ -544,19 +559,19 @@ public final class GatingEngine {
         double rawX = index.getMarkerValues(markerIdxX)[cellIdx];
         double rawY = index.getMarkerValues(markerIdxY)[cellIdx];
 
-        // Outlier exclusion on X channel
+        // Outlier exclusion — flag but continue walking
         if (gate.isExcludeOutliers()) {
             double loX = stats.getPercentileValue(gate.getChannelX(), gate.getClipPercentileLow());
             double hiX = stats.getPercentileValue(gate.getChannelX(), gate.getClipPercentileHigh());
             if (!Double.isNaN(loX) && !Double.isNaN(hiX) && (rawX < loX || rawX > hiX)) {
+                outlier[cellIdx] = true;
                 excluded[cellIdx] = true;
-                return;
             }
             double loY = stats.getPercentileValue(gate.getChannelY(), gate.getClipPercentileLow());
             double hiY = stats.getPercentileValue(gate.getChannelY(), gate.getClipPercentileHigh());
             if (!Double.isNaN(loY) && !Double.isNaN(hiY) && (rawY < loY || rawY > hiY)) {
+                outlier[cellIdx] = true;
                 excluded[cellIdx] = true;
-                return;
             }
         }
 
@@ -567,13 +582,16 @@ public final class GatingEngine {
 
         int quadrant = gate.evaluateQuadrant(compareX, compareY);
         Branch branch = gate.getBranches().get(quadrant);
-        branch.setCount(branch.getCount() + 1);
-        assignBranch(branch, cellIdx, index, stats, phenotypes, excluded, colors);
+        if (!excluded[cellIdx]) {
+            branch.setCount(branch.getCount() + 1);
+        }
+        assignBranch(branch, cellIdx, index, stats, phenotypes, excluded, outlier, colors);
     }
 
     private static void walk2DNode(GateNode node, int cellIdx,
                                       CellIndex index, MarkerStats stats,
-                                      String[] phenotypes, boolean[] excluded, int[] colors) {
+                                      String[] phenotypes, boolean[] excluded, boolean[] outlier,
+                                      int[] colors) {
         List<String> channels = node.getChannels();
         if (channels.size() < 2) return;
         String chX = channels.get(0);
@@ -585,14 +603,20 @@ public final class GatingEngine {
         double rawX = index.getMarkerValues(mxIdx)[cellIdx];
         double rawY = index.getMarkerValues(myIdx)[cellIdx];
 
-        // Outlier exclusion (same semantics as threshold/quadrant gates)
+        // Outlier exclusion (same semantics as threshold/quadrant gates) — flag but continue
         if (node.isExcludeOutliers()) {
             double loX = stats.getPercentileValue(chX, node.getClipPercentileLow());
             double hiX = stats.getPercentileValue(chX, node.getClipPercentileHigh());
-            if (!Double.isNaN(loX) && !Double.isNaN(hiX) && (rawX < loX || rawX > hiX)) { excluded[cellIdx] = true; return; }
+            if (!Double.isNaN(loX) && !Double.isNaN(hiX) && (rawX < loX || rawX > hiX)) {
+                outlier[cellIdx] = true;
+                excluded[cellIdx] = true;
+            }
             double loY = stats.getPercentileValue(chY, node.getClipPercentileLow());
             double hiY = stats.getPercentileValue(chY, node.getClipPercentileHigh());
-            if (!Double.isNaN(loY) && !Double.isNaN(hiY) && (rawY < loY || rawY > hiY)) { excluded[cellIdx] = true; return; }
+            if (!Double.isNaN(loY) && !Double.isNaN(hiY) && (rawY < loY || rawY > hiY)) {
+                outlier[cellIdx] = true;
+                excluded[cellIdx] = true;
+            }
         }
 
         // Use each gate's own z-score flag — boundaries match the scatter plot coordinate space
@@ -611,20 +635,21 @@ public final class GatingEngine {
         }
 
         Branch branch = inside ? node.getBranches().get(0) : node.getBranches().get(1);
-        branch.setCount(branch.getCount() + 1);
-        assignBranch(branch, cellIdx, index, stats, phenotypes, excluded, colors);
+        if (!excluded[cellIdx]) {
+            branch.setCount(branch.getCount() + 1);
+        }
+        assignBranch(branch, cellIdx, index, stats, phenotypes, excluded, outlier, colors);
     }
 
     private static void assignBranch(Branch branch, int cellIdx,
                                       CellIndex index, MarkerStats stats,
                                       String[] phenotypes,
-                                      boolean[] excluded, int[] colors) {
+                                      boolean[] excluded, boolean[] outlier, int[] colors) {
         phenotypes[cellIdx] = branch.getName();
         colors[cellIdx] = branch.getColor();
         if (!branch.getChildren().isEmpty()) {
             for (GateNode child : branch.getChildren()) {
-                if (excluded[cellIdx]) return;
-                walkNode(child, cellIdx, index, stats, phenotypes, excluded, colors);
+                walkNode(child, cellIdx, index, stats, phenotypes, excluded, outlier, colors);
             }
         }
     }

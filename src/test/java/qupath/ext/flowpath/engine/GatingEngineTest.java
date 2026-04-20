@@ -213,12 +213,15 @@ class GatingEngineTest {
 
         AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
 
-        // The two outlier cells should be excluded
+        // The two outlier cells should be excluded and flagged, but still receive a phenotype
         boolean[] excluded = result.getExcluded();
+        boolean[] outlier = result.getOutlier();
         assertTrue(excluded[98], "Low outlier (-100) should be excluded");
         assertTrue(excluded[99], "High outlier (+200) should be excluded");
-        assertNull(result.getPhenotypes()[98], "Excluded cell phenotype should be null");
-        assertNull(result.getPhenotypes()[99], "Excluded cell phenotype should be null");
+        assertTrue(outlier[98], "Low outlier should be flagged as outlier");
+        assertTrue(outlier[99], "High outlier should be flagged as outlier");
+        assertNotNull(result.getPhenotypes()[98], "Outlier cell still gets a would-have-been phenotype");
+        assertNotNull(result.getPhenotypes()[99], "Outlier cell still gets a would-have-been phenotype");
     }
 
     @Test
@@ -335,7 +338,8 @@ class GatingEngineTest {
 
         for (int i = 0; i < 5; i++) {
             assertTrue(result.getExcluded()[i], "Cell " + i + " should be excluded");
-            assertNull(result.getPhenotypes()[i], "Excluded cell phenotype should be null");
+            assertTrue(result.getOutlier()[i], "Quality-filtered cell should be flagged as Outlier");
+            assertNotNull(result.getPhenotypes()[i], "Excluded cell still gets a would-have-been phenotype");
         }
     }
 
@@ -719,9 +723,11 @@ class GatingEngineTest {
         tree.addRoot(root2);
 
         AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
-        // Cell 0 should be excluded by root1's outlier check
+        // Cell 0 should be excluded by root1's outlier check and flagged as outlier,
+        // but still gets a would-have-been phenotype for CSV export.
         assertTrue(result.getExcluded()[0]);
-        assertNull(result.getPhenotypes()[0]);
+        assertTrue(result.getOutlier()[0]);
+        assertNotNull(result.getPhenotypes()[0]);
         // Cell 1 should have composite phenotype (not excluded)
         assertFalse(result.getExcluded()[1]);
         assertTrue(result.getPhenotypes()[1].contains(": "));

@@ -617,21 +617,29 @@ class CsvCorrectnessTest {
 
         CsvResult csv = run(tree, index, stats, "qf_outlier.csv");
 
-        // At least 2 excluded by QF + 1 outlier. Percentile clipping may exclude boundary cells too.
-        assertTrue(csv.rows.size() < nNormal + 3, "Some cells should be excluded");
-        assertTrue(csv.rows.size() >= nNormal - 2, "Most normal cells should survive");
+        // All 53 cells appear in CSV — excluded ones are flagged via Outlier column.
+        assertEquals(nNormal + 3, csv.rows.size(), "All cells should be in CSV (flagged if excluded)");
 
         // First cell (CD45=1) should be negative (below threshold 25)
         assertEquals("CD45-", csv.val(0, "phenotype"));
-        // Outlier cell (-999) should NOT appear in CSV
+
+        // Locate the outlier row (CD45=-999) — it should be present with Outlier=True
+        boolean foundOutlier = false;
         for (int i = 0; i < csv.rows.size(); i++) {
-            assertNotEquals("-999.0000", csv.val(i, "CD45_raw"), "Outlier should be excluded from CSV");
+            if ("-999.0000".equals(csv.val(i, "CD45_raw"))) {
+                foundOutlier = true;
+                assertEquals("True", csv.val(i, "Outlier"), "Outlier cell should be flagged Outlier=True");
+                assertEquals("False", csv.val(i, "Out_of_annotation"));
+            }
         }
-        // QF-failed cells (area=5) should NOT appear — check cell_id column
+        assertTrue(foundOutlier, "Outlier cell should still appear in CSV");
+
+        // QF-failed cells should be present too, flagged as Outlier=True
         for (int i = 0; i < csv.rows.size(); i++) {
             String id = csv.val(i, "cell_id");
-            assertNotEquals(String.valueOf(nNormal), id, "QF-fail cell should be excluded");
-            assertNotEquals(String.valueOf(nNormal + 1), id, "QF-fail cell should be excluded");
+            if (String.valueOf(nNormal).equals(id) || String.valueOf(nNormal + 1).equals(id)) {
+                assertEquals("True", csv.val(i, "Outlier"), "QF-failed cell should have Outlier=True");
+            }
         }
     }
 
@@ -659,11 +667,13 @@ class CsvCorrectnessTest {
 
         CsvResult csv = run(tree, index, stats, "qf_quad.csv");
 
-        assertEquals(5, csv.rows.size(), "Cell 0 excluded by QF");
+        // All 6 cells present — cell 0 flagged as Outlier (QF-failed)
+        assertEquals(6, csv.rows.size(), "All cells in CSV, cell 0 flagged via Outlier column");
+        assertEquals("True", csv.val(0, "Outlier"), "Cell 0 QF-failed -> Outlier=True");
         // Cell 1: CD45=8,CD3=8 → PP
-        assertEquals("CD45+/CD3+", csv.val(0, "phenotype"));
-        assertEquals("+", csv.val(0, "CD45_sign"));
-        assertEquals("+", csv.val(0, "CD3_sign"));
+        assertEquals("CD45+/CD3+", csv.val(1, "phenotype"));
+        assertEquals("+", csv.val(1, "CD45_sign"));
+        assertEquals("+", csv.val(1, "CD3_sign"));
     }
 
     @Test
@@ -686,11 +696,13 @@ class CsvCorrectnessTest {
 
         CsvResult csv = run(tree, index, stats, "qf_rect.csv");
 
-        assertEquals(2, csv.rows.size(), "Cell 0 excluded by QF");
+        // All 3 cells present — cell 0 flagged as Outlier (QF-failed)
+        assertEquals(3, csv.rows.size(), "All cells in CSV, cell 0 flagged via Outlier column");
+        assertEquals("True", csv.val(0, "Outlier"));
         String insideName = gate.getBranches().get(0).getName();
         String outsideName = gate.getBranches().get(1).getName();
-        assertEquals(insideName, csv.val(0, "phenotype")); // (5,5) inside [2,8]x[2,8]
-        assertEquals(outsideName, csv.val(1, "phenotype")); // (20,20) outside
+        assertEquals(insideName, csv.val(1, "phenotype")); // (5,5) inside [2,8]x[2,8]
+        assertEquals(outsideName, csv.val(2, "phenotype")); // (20,20) outside
     }
 
     @Test
@@ -721,10 +733,14 @@ class CsvCorrectnessTest {
 
         CsvResult csv = run(tree, index, stats, "disabled_qf.csv");
 
-        assertEquals(2, csv.rows.size());
-        // Cell 1: CD45=8 >= 5 → CD45+, CD3 gate disabled
-        assertEquals("CD45+", csv.val(0, "phenotype"));
+        // All 3 cells present — cell 0 flagged as Outlier (QF-failed, area=10)
+        assertEquals(3, csv.rows.size());
+        assertEquals("True", csv.val(0, "Outlier"));
+        // Cell 0: CD45=2 < 5 → CD45- (would-have-been phenotype)
+        assertEquals("CD45-", csv.val(0, "phenotype"));
+        // Cell 1, 2: CD45=8 >= 5 → CD45+, CD3 gate disabled
         assertEquals("CD45+", csv.val(1, "phenotype"));
+        assertEquals("CD45+", csv.val(2, "phenotype"));
     }
 
     @Test
@@ -833,8 +849,13 @@ class CsvCorrectnessTest {
 
         CsvResult csv = run(tree, index, stats, "outlier_xy.csv");
 
-        // Cells 3 and 4 excluded by outlier on X and Y respectively
-        assertEquals(3, csv.rows.size(), "2 outlier cells excluded, 3 remaining");
+        // All 5 cells present — cells 3 and 4 flagged as Outlier (X-outlier / Y-outlier)
+        assertEquals(5, csv.rows.size(), "All cells in CSV; outliers flagged via Outlier column");
+        assertEquals("False", csv.val(0, "Outlier"));
+        assertEquals("False", csv.val(1, "Outlier"));
+        assertEquals("False", csv.val(2, "Outlier"));
+        assertEquals("True", csv.val(3, "Outlier"), "Cell 3 is an X-outlier (-100)");
+        assertEquals("True", csv.val(4, "Outlier"), "Cell 4 is a Y-outlier (-100)");
     }
 
     @Test
@@ -891,11 +912,12 @@ class CsvCorrectnessTest {
 
         CsvResult csv = run(tree, index, stats, "full_pipeline.csv");
 
-        // QF excludes cells 0,1 (areas 50, 55)
-        // Outlier excludes cell 99 (CD45=-500)
-        // Percentile clipping may exclude a few boundary cells too
-        assertTrue(csv.rows.size() < n, "Some cells should be excluded");
-        assertTrue(csv.rows.size() >= n - 5, "Most cells should survive");
+        // All cells now appear in CSV — QF/outlier-failed ones flagged via Outlier column.
+        // Cell 99 (CD45=-500) should be flagged as Outlier; cells 0,1 QF-failed -> Outlier.
+        assertEquals(n, csv.rows.size(), "All cells in CSV, exclusions flagged via columns");
+        assertEquals("True", csv.val(0, "Outlier"), "Cell 0 QF-failed (area 50 < 60)");
+        assertEquals("True", csv.val(1, "Outlier"), "Cell 1 QF-failed (area 55 < 60)");
+        assertEquals("True", csv.val(n - 1, "Outlier"), "Cell 99 is CD45 outlier");
 
         // All rows should have CD45, CD3, CD8, CD20 raw columns (all markers)
         assertTrue(csv.header.contains("CD20_raw"), "Ungated CD20 should still appear in CSV");

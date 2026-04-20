@@ -58,11 +58,14 @@ public class PhenotypeCsvExporter {
         }
 
         String[] phenotypes = result.getPhenotypes();
-        boolean[] excluded = result.getExcluded();
+        boolean[] outOfAnnotation = result.getOutOfAnnotation();
+        boolean[] outlier = result.getOutlier();
 
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(file, StandardCharsets.UTF_8))) {
-            // Write header
-            writer.write("cell_id,phenotype,centroid_x,centroid_y,area,perimeter,eccentricity,solidity");
+            // Write header — Out_of_annotation and Outlier flag cells that are excluded
+            // from QuPath's visual classification but are still present as CSV rows with
+            // their would-have-been phenotype.
+            writer.write("cell_id,phenotype,Out_of_annotation,Outlier,centroid_x,centroid_y,area,perimeter,eccentricity,solidity");
             for (String marker : markerColumns) {
                 String safe = escapeCsv(marker);
                 writer.write("," + safe + "_raw");
@@ -71,19 +74,19 @@ public class PhenotypeCsvExporter {
             }
             writer.newLine();
 
-            // Write one row per non-excluded cell
+            // Write one row per cell (excluded cells included, flagged via the two columns)
             int n = index.getSize();
             for (int i = 0; i < n; i++) {
-                if (excluded[i]) {
-                    continue;
-                }
-
                 String phenotype = phenotypes[i] != null ? phenotypes[i] : "";
 
                 // Identity
                 writer.write(String.valueOf(i));
                 writer.write(',');
                 writer.write(escapeCsv(phenotype));
+                writer.write(',');
+                writer.write(outOfAnnotation[i] ? "True" : "False");
+                writer.write(',');
+                writer.write(outlier[i] ? "True" : "False");
 
                 // Spatial + geometry (empty if NaN)
                 writer.write(',' + fmt(index.getCentroidX(i)));

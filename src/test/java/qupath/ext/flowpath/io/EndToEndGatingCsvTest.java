@@ -405,11 +405,16 @@ class EndToEndGatingCsvTest {
 
         CsvResult csv = runPipeline(tree, index, stats, "qf_threshold.csv");
 
-        // Cell 0 excluded by QF, so only 3 rows in CSV
-        assertEquals(3, csv.rows.size());
+        // All 4 cells appear in CSV — cell 0 is QF-excluded but still receives a
+        // would-have-been phenotype (CD45-, value 3 < 5) and is flagged via Outlier=True.
+        assertEquals(4, csv.rows.size());
         assertEquals("CD45-", csv.cellValue(0, "phenotype"));
-        assertEquals("CD45+", csv.cellValue(1, "phenotype"));
+        assertEquals("True", csv.cellValue(0, "Outlier"));
+        assertEquals("False", csv.cellValue(0, "Out_of_annotation"));
+        assertEquals("CD45-", csv.cellValue(1, "phenotype"));
+        assertEquals("False", csv.cellValue(1, "Outlier"));
         assertEquals("CD45+", csv.cellValue(2, "phenotype"));
+        assertEquals("CD45+", csv.cellValue(3, "phenotype"));
     }
 
     // ========== Test 10: 3-level hierarchy (CD45 > CD3 > CD8) ==========

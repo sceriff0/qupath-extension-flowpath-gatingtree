@@ -117,6 +117,8 @@ class PhenotypeCsvExporterTest {
         String header = lines.get(0);
         assertTrue(header.contains("cell_id"), "Header should contain cell_id");
         assertTrue(header.contains("phenotype"), "Header should contain phenotype");
+        assertTrue(header.contains("Out_of_annotation"), "Header should contain Out_of_annotation");
+        assertTrue(header.contains("Outlier"), "Header should contain Outlier");
         assertTrue(header.contains("centroid_x"), "Header should contain centroid_x");
         assertTrue(header.contains("centroid_y"), "Header should contain centroid_y");
         assertTrue(header.contains("area"), "Header should contain area");
@@ -127,18 +129,15 @@ class PhenotypeCsvExporterTest {
         assertTrue(header.contains("CD45_zscore"), "Header should contain CD45_zscore");
         assertTrue(header.contains("CD45_sign"), "Header should contain CD45_sign");
 
-        // No cells excluded -> 4 data rows
-        int nonExcluded = 0;
-        for (boolean ex : result.getExcluded()) {
-            if (!ex) nonExcluded++;
-        }
-        assertEquals(nonExcluded, lines.size() - 1,
-                "Number of data rows should equal non-excluded cell count");
+        // Every cell is a row — now includes excluded cells flagged via the two columns
+        assertEquals(result.getExcluded().length, lines.size() - 1,
+                "CSV should contain one data row per cell, including excluded ones");
     }
 
     @Test
-    void excludedCellsNotInCsv() throws IOException {
+    void excludedCellsAppearInCsvWithOutlierFlag() throws IOException {
         // 6 cells with areas 10,20,30,60,70,80. QF minArea=50 excludes first 3.
+        // All 6 cells should appear in the CSV — the excluded ones with Outlier=True.
         List<String> markers = List.of("CD45");
         double[][] values = { {1, 2, 3, 4, 5, 6} };
         double[] areas = {10, 20, 30, 60, 70, 80};
@@ -159,19 +158,32 @@ class PhenotypeCsvExporterTest {
 
         AssignmentResult result = GatingEngine.assignAll(tree, index, stats);
 
-        // Count non-excluded
-        int nonExcluded = 0;
-        for (boolean ex : result.getExcluded()) {
-            if (!ex) nonExcluded++;
-        }
-        assertEquals(3, nonExcluded, "3 cells should pass the quality filter");
-
         File csvFile = tempDir.resolve("excluded.csv").toFile();
         PhenotypeCsvExporter.export(csvFile, index, result, tree, stats);
 
         List<String> lines = Files.readAllLines(csvFile.toPath());
-        assertEquals(nonExcluded, lines.size() - 1,
-                "CSV data rows should equal non-excluded count");
+        assertEquals(6, lines.size() - 1, "CSV should contain all 6 cells (header + 6 rows)");
+
+        List<String> headerFields = parseCsvLine(lines.get(0));
+        int outCol = headerFields.indexOf("Out_of_annotation");
+        int outlierCol = headerFields.indexOf("Outlier");
+        int phenoCol = headerFields.indexOf("phenotype");
+        assertTrue(outCol >= 0 && outlierCol >= 0, "Out_of_annotation and Outlier columns should exist");
+
+        // Cells 0-2: QF-excluded (Outlier=True), still get phenotype (CD45- since values 1,2,3 < 3.5)
+        for (int i = 0; i < 3; i++) {
+            List<String> row = parseCsvLine(lines.get(i + 1));
+            assertEquals("False", row.get(outCol), "Cell " + i + " not spatially out of annotation");
+            assertEquals("True", row.get(outlierCol), "Cell " + i + " is QF-filtered -> Outlier=True");
+            assertEquals("CD45-", row.get(phenoCol), "Cell " + i + " still receives a would-have-been phenotype");
+        }
+        // Cells 3-5: pass QF (Outlier=False), phenotype CD45+ (values 4,5,6 >= 3.5)
+        for (int i = 3; i < 6; i++) {
+            List<String> row = parseCsvLine(lines.get(i + 1));
+            assertEquals("False", row.get(outCol));
+            assertEquals("False", row.get(outlierCol));
+            assertEquals("CD45+", row.get(phenoCol));
+        }
     }
 
     @Test
@@ -347,7 +359,7 @@ class PhenotypeCsvExporterTest {
     }
 
     @Test
-    void zeroNonExcludedCellsProducesHeaderOnly() throws IOException {
+    void allCellsExcludedStillExportedWithOutlierFlag() throws IOException {
         List<String> markers = List.of("CD45");
         double[][] values = { {1, 2, 3} };
         CellIndex index = buildIndex(markers, values, null); // default area=100
@@ -373,11 +385,64 @@ class PhenotypeCsvExporterTest {
             assertTrue(ex, "All cells should be excluded");
         }
 
-        File csvFile = tempDir.resolve("header_only.csv").toFile();
+        File csvFile = tempDir.resolve("all_excluded.csv").toFile();
         PhenotypeCsvExporter.export(csvFile, index, result, tree, stats);
 
         List<String> lines = Files.readAllLines(csvFile.toPath());
-        assertEquals(1, lines.size(), "CSV should contain only the header line");
-        assertTrue(lines.get(0).startsWith("cell_id,"), "The single line should be the header");
+        assertEquals(4, lines.size(), "Header + 3 rows (excluded cells still exported)");
+        assertTrue(lines.get(0).startsWith("cell_id,"), "First line should be the header");
+
+        List<String> headerFields = parseCsvLine(lines.get(0));
+        int outlierCol = headerFields.indexOf("Outlier");
+        for (int i = 1; i < 4; i++) {
+            List<String> row = parseCsvLine(lines.get(i));
+            assertEquals("True", row.get(outlierCol), "Every excluded-by-QF cell has Outlier=True");
+        }
+    }
+
+    @Test
+    void outOfAnnotationFlagIsSetForRoiExcludedCells() throws IOException {
+        // 4 cells; we pass a hand-rolled ROI mask that excludes cells 0 and 1.
+        List<String> markers = List.of("CD45");
+        double[][] values = { {1, 2, 7, 8} };
+        CellIndex index = buildIndex(markers, values, null);
+        boolean[] mask = allTrueMask(4);
+        MarkerStats stats = MarkerStats.compute(index, mask);
+
+        GateNode gate = new GateNode("CD45", 5.0);
+        gate.setThresholdIsZScore(false);
+
+        GateTree tree = new GateTree();
+        tree.setQualityFilter(null);
+        tree.addRoot(gate);
+
+        boolean[] roiMask = {false, false, true, true};
+        AssignmentResult result = GatingEngine.assignAll(tree, index, stats, roiMask);
+
+        File csvFile = tempDir.resolve("roi.csv").toFile();
+        PhenotypeCsvExporter.export(csvFile, index, result, tree, stats);
+
+        List<String> lines = Files.readAllLines(csvFile.toPath());
+        assertEquals(5, lines.size(), "Header + 4 data rows (all cells present)");
+
+        List<String> headerFields = parseCsvLine(lines.get(0));
+        int outCol = headerFields.indexOf("Out_of_annotation");
+        int outlierCol = headerFields.indexOf("Outlier");
+        int phenoCol = headerFields.indexOf("phenotype");
+
+        // Cells 0,1: Out_of_annotation=True, Outlier=False; still get phenotype CD45-
+        for (int i = 0; i < 2; i++) {
+            List<String> row = parseCsvLine(lines.get(i + 1));
+            assertEquals("True", row.get(outCol), "Cell " + i + " outside ROI -> Out_of_annotation=True");
+            assertEquals("False", row.get(outlierCol));
+            assertEquals("CD45-", row.get(phenoCol));
+        }
+        // Cells 2,3: inside ROI; phenotype CD45+ (values 7,8 >= 5)
+        for (int i = 2; i < 4; i++) {
+            List<String> row = parseCsvLine(lines.get(i + 1));
+            assertEquals("False", row.get(outCol));
+            assertEquals("False", row.get(outlierCol));
+            assertEquals("CD45+", row.get(phenoCol));
+        }
     }
 }
