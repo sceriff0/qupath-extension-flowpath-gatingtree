@@ -24,8 +24,11 @@ import qupath.ext.flowpath.model.MarkerStats;
 import qupath.ext.flowpath.model.PolygonGate;
 import qupath.ext.flowpath.model.QuadrantGate;
 import qupath.ext.flowpath.model.RectangleGate;
+import qupath.lib.display.ChannelDisplayInfo;
+import qupath.lib.display.ImageDisplay;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.gui.dialogs.Dialogs;
+import qupath.lib.gui.viewer.QuPathViewer;
 import qupath.lib.images.ImageData;
 import qupath.lib.objects.PathObject;
 import qupath.lib.objects.hierarchy.events.PathObjectHierarchyEvent;
@@ -50,6 +53,7 @@ public class FlowPathPane extends BorderPane {
     private final GateEditorPane editorPane;
     private final QualityFilterPane qualityFilterPane;
     private final CheckBox roiFilterCheckBox;
+    private final CheckBox syncViewerChannelsToggle;
     private final LivePreviewService previewService;
     private final Label statusBar;
     private final ComboBox<String> colorByRootCombo;
@@ -107,6 +111,16 @@ public class FlowPathPane extends BorderPane {
         roiFilterCheckBox.setStyle("-fx-text-fill: black; -fx-font-size: 10;");
         roiFilterCheckBox.setOnAction(e -> { if (!suppressRoiFilterEvents) onRoiFilterToggled(); });
 
+        // Auto-sync the QuPath viewer's visible channels to the selected gate's channel(s)
+        syncViewerChannelsToggle = new CheckBox("Sync viewer channels");
+        syncViewerChannelsToggle.setStyle("-fx-text-fill: black; -fx-font-size: 10;");
+        syncViewerChannelsToggle.setSelected(true);
+        syncViewerChannelsToggle.setTooltip(new Tooltip(
+            "Show only the selected gate's channel(s) in the QuPath viewer."));
+        syncViewerChannelsToggle.setOnAction(e -> {
+            if (syncViewerChannelsToggle.isSelected()) syncViewerChannels(currentNode);
+        });
+
         qualityFilterPane = new QualityFilterPane(gateTree.getQualityFilter());
         qualityFilterPane.setOnFilterChanged(filter -> onQualityFilterChanged());
 
@@ -125,7 +139,8 @@ public class FlowPathPane extends BorderPane {
         HBox treeToolbar = new HBox(4, addRootBtn, colorByRootCombo);
         HBox.setHgrow(addRootBtn, Priority.ALWAYS);
 
-        VBox leftPane = new VBox(4, treeView, treeToolbar, roiFilterCheckBox, qualityFilterPane);
+        HBox togglesRow = new HBox(8, roiFilterCheckBox, syncViewerChannelsToggle);
+        VBox leftPane = new VBox(4, treeView, treeToolbar, togglesRow, qualityFilterPane);
         VBox.setVgrow(treeView, Priority.ALWAYS);
         leftPane.setPadding(new Insets(4));
         leftPane.setPrefWidth(280);
@@ -579,6 +594,7 @@ public class FlowPathPane extends BorderPane {
             currentNode = node;
             editorPane.setAncestorMask(computeAncestorMask(node));
             editorPane.setGateNode(node);
+            syncViewerChannels(node);
         } else {
             editorPane.setAncestorMask(null);
             editorPane.setGateNode(null);
@@ -662,11 +678,69 @@ public class FlowPathPane extends BorderPane {
         pushUndoCoalesced();
         treeView.refresh();
         requestPreviewUpdate();
+        syncViewerChannels(currentNode);
     }
 
     private void onGateEnabledToggled(GateNode node) {
         pushUndoCoalesced();
         requestPreviewUpdate();
+    }
+
+    /**
+     * Restrict the QuPath viewer's visible channels to those used by {@code gate}.
+     * Threshold gates yield 1 channel; 2D gates (Quadrant/Polygon/Rect/Ellipse) yield 2.
+     * No-op if the toggle is off, no image is open, the gate has no channels, or none
+     * of the gate's channels match an available channel (defensive — never blacks out
+     * the viewer on bad data).
+     */
+    private void syncViewerChannels(GateNode gate) {
+        if (syncViewerChannelsToggle == null || !syncViewerChannelsToggle.isSelected()) return;
+        if (gate == null) return;
+        try {
+            QuPathViewer viewer = qupath.getViewer();
+            if (viewer == null) return;
+            ImageDisplay display = viewer.getImageDisplay();
+            if (display == null) return;
+
+            List<String> gateChannels = gate.getChannels();
+            if (gateChannels == null || gateChannels.isEmpty()) return;
+
+            Set<String> wanted = new HashSet<>();
+            Set<String> wantedLower = new HashSet<>();
+            for (String c : gateChannels) {
+                if (c == null || c.isBlank()) continue;
+                wanted.add(c);
+                wantedLower.add(c.toLowerCase(Locale.ROOT));
+            }
+            if (wanted.isEmpty()) return;
+
+            List<ChannelDisplayInfo> available = display.availableChannels();
+            if (available == null || available.isEmpty()) return;
+
+            // First pass: do any available channels match? If not, leave display alone.
+            boolean anyMatch = false;
+            for (ChannelDisplayInfo info : available) {
+                String name = info.getName();
+                if (name == null) continue;
+                if (wanted.contains(name) || wantedLower.contains(name.toLowerCase(Locale.ROOT))) {
+                    anyMatch = true;
+                    break;
+                }
+            }
+            if (!anyMatch) return;
+
+            // Apply: select matching channels, deselect the rest.
+            for (ChannelDisplayInfo info : available) {
+                String name = info.getName();
+                boolean shouldShow = name != null
+                    && (wanted.contains(name) || wantedLower.contains(name.toLowerCase(Locale.ROOT)));
+                display.setChannelSelected(info, shouldShow);
+            }
+        } catch (Exception ex) {
+            // Never let a viewer-sync failure break gate editing.
+            org.slf4j.LoggerFactory.getLogger(FlowPathPane.class)
+                .warn("Failed to sync viewer channels: {}", ex.toString());
+        }
     }
 
     private void onQualityFilterChanged() {
