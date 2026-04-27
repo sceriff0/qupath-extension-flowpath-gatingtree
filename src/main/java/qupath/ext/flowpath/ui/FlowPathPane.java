@@ -25,6 +25,7 @@ import qupath.ext.flowpath.model.PolygonGate;
 import qupath.ext.flowpath.model.QuadrantGate;
 import qupath.ext.flowpath.model.RectangleGate;
 import qupath.lib.display.ChannelDisplayInfo;
+import qupath.lib.display.DirectServerChannelInfo;
 import qupath.lib.display.ImageDisplay;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.gui.dialogs.Dialogs;
@@ -692,10 +693,16 @@ public class FlowPathPane extends BorderPane {
      * No-op if the toggle is off, no image is open, the gate has no channels, or none
      * of the gate's channels match an available channel (defensive — never blacks out
      * the viewer on bad data).
+     *
+     * <p>Channel matching tries multiple name forms because QuPath's
+     * {@link DirectServerChannelInfo#getName()} may return a decorated form like
+     * {@code "DAPI (Channel 1)"} while {@link DirectServerChannelInfo#getOriginalChannelName()}
+     * (and FlowPath's stored marker names) use the raw {@code "DAPI"}.
      */
     private void syncViewerChannels(GateNode gate) {
         if (syncViewerChannelsToggle == null || !syncViewerChannelsToggle.isSelected()) return;
         if (gate == null) return;
+        var log = org.slf4j.LoggerFactory.getLogger(FlowPathPane.class);
         try {
             QuPathViewer viewer = qupath.getViewer();
             if (viewer == null) return;
@@ -705,41 +712,61 @@ public class FlowPathPane extends BorderPane {
             List<String> gateChannels = gate.getChannels();
             if (gateChannels == null || gateChannels.isEmpty()) return;
 
-            Set<String> wanted = new HashSet<>();
             Set<String> wantedLower = new HashSet<>();
             for (String c : gateChannels) {
                 if (c == null || c.isBlank()) continue;
-                wanted.add(c);
                 wantedLower.add(c.toLowerCase(Locale.ROOT));
             }
-            if (wanted.isEmpty()) return;
+            if (wantedLower.isEmpty()) return;
 
             List<ChannelDisplayInfo> available = display.availableChannels();
             if (available == null || available.isEmpty()) return;
 
-            // First pass: do any available channels match? If not, leave display alone.
-            boolean anyMatch = false;
-            for (ChannelDisplayInfo info : available) {
-                String name = info.getName();
-                if (name == null) continue;
-                if (wanted.contains(name) || wantedLower.contains(name.toLowerCase(Locale.ROOT))) {
-                    anyMatch = true;
-                    break;
-                }
+            // For each available channel, build the set of candidate names we'll match
+            // against (lowercased): getName() always, plus getOriginalChannelName() when
+            // it's a DirectServerChannelInfo (the common fluorescence case).
+            class Decision {
+                final ChannelDisplayInfo info;
+                final boolean show;
+                Decision(ChannelDisplayInfo info, boolean show) { this.info = info; this.show = show; }
             }
-            if (!anyMatch) return;
-
-            // Apply: select matching channels, deselect the rest.
+            List<Decision> decisions = new ArrayList<>(available.size());
+            int matchCount = 0;
             for (ChannelDisplayInfo info : available) {
-                String name = info.getName();
-                boolean shouldShow = name != null
-                    && (wanted.contains(name) || wantedLower.contains(name.toLowerCase(Locale.ROOT)));
-                display.setChannelSelected(info, shouldShow);
+                Set<String> candidates = new HashSet<>();
+                String displayName = info.getName();
+                if (displayName != null) candidates.add(displayName.toLowerCase(Locale.ROOT));
+                if (info instanceof DirectServerChannelInfo dsci) {
+                    String original = dsci.getOriginalChannelName();
+                    if (original != null) candidates.add(original.toLowerCase(Locale.ROOT));
+                }
+                boolean show = !Collections.disjoint(candidates, wantedLower);
+                if (show) matchCount++;
+                decisions.add(new Decision(info, show));
+            }
+
+            if (matchCount == 0) {
+                // No match — leave display untouched and tell the user why so they can
+                // check for a name-format mismatch.
+                if (log.isDebugEnabled()) {
+                    List<String> availNames = available.stream()
+                        .map(ChannelDisplayInfo::getName).toList();
+                    log.debug("Viewer channel sync: no match for gate channels {} in available {}",
+                        gateChannels, availNames);
+                }
+                return;
+            }
+
+            for (Decision d : decisions) {
+                display.setChannelSelected(d.info, d.show);
+            }
+            if (log.isTraceEnabled()) {
+                log.trace("Viewer channel sync: {} of {} channels selected (gate channels {})",
+                    matchCount, available.size(), gateChannels);
             }
         } catch (Exception ex) {
             // Never let a viewer-sync failure break gate editing.
-            org.slf4j.LoggerFactory.getLogger(FlowPathPane.class)
-                .warn("Failed to sync viewer channels: {}", ex.toString());
+            log.warn("Failed to sync viewer channels: {}", ex.toString());
         }
     }
 
