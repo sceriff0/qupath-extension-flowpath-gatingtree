@@ -28,6 +28,13 @@ import java.util.Set;
  * <p>
  * Each row represents a single cell. Columns include identity, spatial coordinates,
  * geometry measurements, and per-marker triplets (raw intensity, z-score, gating sign).
+ * <p>
+ * The {@code <marker>_sign} column reports independent positivity for each marker:
+ * a cell is {@code "+"} on a marker if it passes <em>at least one</em> threshold
+ * imposed on that marker anywhere in the gate tree (1D thresholds from threshold
+ * gates and quadrant gates, plus 2D region containment from polygon/rectangle/
+ * ellipse gates). Markers that have no threshold and no region gate anywhere in
+ * the tree get a blank sign.
  */
 public class PhenotypeCsvExporter {
 
@@ -35,26 +42,22 @@ public class PhenotypeCsvExporter {
         // static utility class
     }
 
+    /** A 1D threshold imposed on a marker by a ThresholdGate or one axis of a QuadrantGate. */
+    private record MarkerThreshold(double threshold, boolean isZScore) {}
+
     /**
-     * Export phenotype assignments to CSV with raw intensities, z-scores, and geometry.
-     *
-     * @param file   destination CSV file
-     * @param index  the cell index containing objects and marker data
-     * @param result the gating assignment result
-     * @param tree   the gate tree used for the assignment
-     * @param stats  per-marker statistics for z-score computation (may be null)
-     * @throws IOException if writing fails
+     * Export phenotype assignments to CSV with raw intensities, z-scores, and signs.
      */
     public static void export(File file, CellIndex index, GatingEngine.AssignmentResult result,
                               GateTree tree, MarkerStats stats) throws IOException {
 
-        // 1. Collect all marker channels: gated ones first, then remaining from index
         List<String> markerColumns = collectAllMarkers(tree, index);
 
-        // 2. Build a lookup from phenotype name -> marker sign map
-        Map<String, Map<String, String>> phenotypeMarkerSigns = new LinkedHashMap<>();
+        // Threshold inventory: 1D cuts grouped by marker, 2D region gates grouped by each axis channel.
+        Map<String, List<MarkerThreshold>> thresholdsByMarker = new LinkedHashMap<>();
+        Map<String, List<GateNode>> regionGatesByChannel = new LinkedHashMap<>();
         for (GateNode root : tree.getRoots()) {
-            traceMarkerSigns(root, new LinkedHashMap<>(), phenotypeMarkerSigns);
+            collectThresholdsRecursive(root, thresholdsByMarker, regionGatesByChannel);
         }
 
         String[] phenotypes = result.getPhenotypes();
@@ -62,9 +65,8 @@ public class PhenotypeCsvExporter {
         boolean[] outlier = result.getOutlier();
 
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(file, StandardCharsets.UTF_8))) {
-            // Write header — Out_of_annotation and Outlier flag cells that are excluded
-            // from QuPath's visual classification but are still present as CSV rows with
-            // their would-have-been phenotype.
+            // Header — Out_of_annotation and Outlier flag cells excluded from QuPath
+            // visual classification but still written as CSV rows.
             writer.write("cell_id,phenotype,Out_of_annotation,Outlier,centroid_x,centroid_y,area,perimeter,eccentricity,solidity");
             for (String marker : markerColumns) {
                 String safe = escapeCsv(marker);
@@ -74,12 +76,10 @@ public class PhenotypeCsvExporter {
             }
             writer.newLine();
 
-            // Write one row per cell (excluded cells included, flagged via the two columns)
             int n = index.getSize();
             for (int i = 0; i < n; i++) {
                 String phenotype = phenotypes[i] != null ? phenotypes[i] : "";
 
-                // Identity
                 writer.write(String.valueOf(i));
                 writer.write(',');
                 writer.write(escapeCsv(phenotype));
@@ -88,16 +88,12 @@ public class PhenotypeCsvExporter {
                 writer.write(',');
                 writer.write(outlier[i] ? "True" : "False");
 
-                // Spatial + geometry (empty if NaN)
                 writer.write(',' + fmt(index.getCentroidX(i)));
                 writer.write(',' + fmt(index.getCentroidY(i)));
                 writer.write(',' + fmt(index.getArea(i)));
                 writer.write(',' + fmt(index.getPerimeter(i)));
                 writer.write(',' + fmt(index.getEccentricity(i)));
                 writer.write(',' + fmt(index.getSolidity(i)));
-
-                // Per marker: raw, zscore, sign
-                Map<String, String> signs = resolveCompositeSigns(phenotype, phenotypeMarkerSigns);
 
                 for (String marker : markerColumns) {
                     int mIdx = index.getMarkerIndex(marker);
@@ -110,7 +106,9 @@ public class PhenotypeCsvExporter {
                         zscore = stats.toZScore(marker, raw);
                     }
 
-                    String sign = (signs != null && signs.containsKey(marker)) ? signs.get(marker) : "";
+                    String sign = computeSign(i, marker, raw, index, stats,
+                                              thresholdsByMarker.get(marker),
+                                              regionGatesByChannel.get(marker));
 
                     writer.write(',' + fmt(raw));
                     writer.write(',' + fmt(zscore));
@@ -122,25 +120,106 @@ public class PhenotypeCsvExporter {
     }
 
     /**
-     * Resolve marker signs for a phenotype, handling composite (derived) phenotypes.
-     * Composite phenotypes use ": " as separator (QuPath derived PathClass format).
-     * For composites, sign maps from each component are merged.
+     * DFS the tree (enabled gates only), collecting 1D thresholds per marker and
+     * 2D region gates per axis channel.
      */
-    private static Map<String, String> resolveCompositeSigns(String phenotype,
-                                                              Map<String, Map<String, String>> signMap) {
-        // Fast path: direct lookup (single root, or quadrant gate with "/" in name)
-        Map<String, String> direct = signMap.get(phenotype);
-        if (direct != null) return direct;
-
-        // Composite: split by ": " and merge sign maps from each component
-        if (!phenotype.contains(": ")) return null;
-        String[] parts = phenotype.split(": ");
-        Map<String, String> merged = new LinkedHashMap<>();
-        for (String part : parts) {
-            Map<String, String> partSigns = signMap.get(part);
-            if (partSigns != null) merged.putAll(partSigns);
+    private static void collectThresholdsRecursive(
+            GateNode node,
+            Map<String, List<MarkerThreshold>> thresholds,
+            Map<String, List<GateNode>> regionGates) {
+        if (!node.isEnabled()) return;
+        if (node instanceof QuadrantGate qg) {
+            boolean z = qg.isThresholdIsZScore();
+            thresholds.computeIfAbsent(qg.getChannelX(), k -> new ArrayList<>())
+                      .add(new MarkerThreshold(qg.getThresholdX(), z));
+            thresholds.computeIfAbsent(qg.getChannelY(), k -> new ArrayList<>())
+                      .add(new MarkerThreshold(qg.getThresholdY(), z));
+        } else if (node instanceof PolygonGate || node instanceof RectangleGate || node instanceof EllipseGate) {
+            List<String> chs = node.getChannels();
+            if (chs.size() >= 2) {
+                regionGates.computeIfAbsent(chs.get(0), k -> new ArrayList<>()).add(node);
+                regionGates.computeIfAbsent(chs.get(1), k -> new ArrayList<>()).add(node);
+            }
+        } else {
+            // ThresholdGate: 1D cut on a single channel
+            String ch = node.getChannel();
+            if (ch != null && !ch.isEmpty()) {
+                thresholds.computeIfAbsent(ch, k -> new ArrayList<>())
+                          .add(new MarkerThreshold(node.getThreshold(), node.isThresholdIsZScore()));
+            }
         }
-        return merged.isEmpty() ? null : merged;
+        for (Branch b : node.getBranches()) {
+            for (GateNode child : b.getChildren()) {
+                collectThresholdsRecursive(child, thresholds, regionGates);
+            }
+        }
+    }
+
+    /**
+     * Decide marker positivity for a cell by OR-combining every imposed threshold:
+     * 1D cuts from ThresholdGate / QuadrantGate axes (compare-mode honors each
+     * gate's z-score flag), plus 2D containment from PolygonGate / RectangleGate /
+     * EllipseGate (cell inside region → "+" on both axis channels).
+     * <p>
+     * Returns blank if the marker has no threshold or region anywhere in the tree.
+     * Mirrors {@code GatingEngine.walkThresholdNode} and {@code walk2DNode}.
+     */
+    private static String computeSign(int cellIdx, String marker, double raw,
+                                       CellIndex index, MarkerStats stats,
+                                       List<MarkerThreshold> thresholds,
+                                       List<GateNode> regionGates) {
+        boolean hasThresholds = thresholds != null && !thresholds.isEmpty();
+        boolean hasRegions = regionGates != null && !regionGates.isEmpty();
+        if (!hasThresholds && !hasRegions) return "";
+        if (Double.isNaN(raw)) return "";
+
+        if (hasThresholds) {
+            for (MarkerThreshold t : thresholds) {
+                double cmp;
+                if (t.isZScore()) {
+                    if (stats == null || stats.getStd(marker) <= 1e-10) continue;
+                    cmp = stats.toZScore(marker, raw);
+                } else {
+                    cmp = raw;
+                }
+                if (cmp >= t.threshold()) return "+";
+            }
+        }
+
+        if (hasRegions) {
+            for (GateNode gate : regionGates) {
+                List<String> chs = gate.getChannels();
+                if (chs.size() < 2) continue;
+                String chX = chs.get(0);
+                String chY = chs.get(1);
+                int xIdx = index.getMarkerIndex(chX);
+                int yIdx = index.getMarkerIndex(chY);
+                if (xIdx < 0 || yIdx < 0) continue;
+                double rawX = index.getMarkerValues(xIdx)[cellIdx];
+                double rawY = index.getMarkerValues(yIdx)[cellIdx];
+                if (Double.isNaN(rawX) || Double.isNaN(rawY)) continue;
+                double vx;
+                double vy;
+                if (gate.isThresholdIsZScore()) {
+                    if (stats == null
+                            || stats.getStd(chX) <= 1e-10
+                            || stats.getStd(chY) <= 1e-10) continue;
+                    vx = stats.toZScore(chX, rawX);
+                    vy = stats.toZScore(chY, rawY);
+                } else {
+                    vx = rawX;
+                    vy = rawY;
+                }
+                boolean inside;
+                if (gate instanceof PolygonGate pg) inside = pg.contains(vx, vy);
+                else if (gate instanceof RectangleGate rg) inside = rg.contains(vx, vy);
+                else if (gate instanceof EllipseGate eg) inside = eg.contains(vx, vy);
+                else continue;
+                if (inside) return "+";
+            }
+        }
+
+        return "-";
     }
 
     /** Format a double for CSV; NaN → empty string. Uses US locale to ensure dot decimal separator. */
@@ -157,7 +236,6 @@ public class PhenotypeCsvExporter {
         for (GateNode root : tree.getRoots()) {
             collectChannelsRecursive(root, seen);
         }
-        // Add all remaining markers from the index
         for (String m : index.getMarkerNames()) {
             seen.add(m);
         }
@@ -174,82 +252,11 @@ public class PhenotypeCsvExporter {
     }
 
     /**
-     * Recursively trace all paths through the gate tree. At each leaf (a node
-     * with no children on a given branch), record the accumulated marker signs
-     * keyed by the leaf phenotype name.
-     * <p>
-     * For threshold gates: positive branch gets "+", negative gets "-".
-     * For quadrant gates: each channel gets "+" or "-" based on the quadrant.
-     */
-    private static void traceMarkerSigns(GateNode node,
-                                         Map<String, String> currentSigns,
-                                         Map<String, Map<String, String>> result) {
-        if (!node.isEnabled()) return;
-        List<Branch> branches = node.getBranches();
-        List<String> channels = node.getChannels();
-
-        if (node instanceof QuadrantGate) {
-            // Quadrant: 4 branches (PP, NP, PN, NN), 2 channels (X, Y)
-            String[][] signPatterns = {{"+", "+"}, {"-", "+"}, {"+", "-"}, {"-", "-"}};
-            for (int i = 0; i < branches.size(); i++) {
-                Branch branch = branches.get(i);
-                Map<String, String> path = new LinkedHashMap<>(currentSigns);
-                for (int c = 0; c < channels.size() && c < signPatterns[i].length; c++) {
-                    path.put(channels.get(c), signPatterns[i][c]);
-                }
-                traceBranch(branch, path, result);
-            }
-        } else if (node instanceof PolygonGate || node instanceof RectangleGate || node instanceof EllipseGate) {
-            // 2D region gates: 2 branches (inside="+", outside="-"), 2 channels
-            String[] signs = {"+", "-"};
-            for (int i = 0; i < branches.size(); i++) {
-                Branch branch = branches.get(i);
-                Map<String, String> path = new LinkedHashMap<>(currentSigns);
-                for (String ch : channels) {
-                    path.put(ch, signs[Math.min(i, signs.length - 1)]);
-                }
-                traceBranch(branch, path, result);
-            }
-        } else {
-            // Threshold gate: 2 branches (positive="+", negative="-")
-            String[] signs = {"+", "-"};
-            String channel = channels.isEmpty() ? "" : channels.get(0);
-            for (int i = 0; i < branches.size(); i++) {
-                Branch branch = branches.get(i);
-                Map<String, String> path = new LinkedHashMap<>(currentSigns);
-                if (!channel.isEmpty()) {
-                    path.put(channel, signs[i]);
-                }
-                traceBranch(branch, path, result);
-            }
-        }
-    }
-
-    /**
-     * Record the sign path for a branch. If the branch is a logical leaf
-     * (no children, or all children disabled), record its name directly.
-     * Otherwise recurse into enabled children.
-     */
-    private static void traceBranch(Branch branch, Map<String, String> path,
-                                    Map<String, Map<String, String>> result) {
-        boolean isLogicalLeaf = branch.isLeaf()
-                || branch.getChildren().stream().noneMatch(GateNode::isEnabled);
-        if (isLogicalLeaf) {
-            result.put(branch.getName(), new LinkedHashMap<>(path));
-        } else {
-            for (GateNode child : branch.getChildren()) {
-                traceMarkerSigns(child, path, result);
-            }
-        }
-    }
-
-    /**
-     * Escape a value for CSV output. Wraps the value in double quotes if it
-     * contains a comma, double quote, or newline.
+     * Escape a value for CSV output. Wraps in double quotes if it contains a
+     * comma, double quote, or newline.
      */
     private static String escapeCsv(String value) {
-        if (value == null)
-            return "";
+        if (value == null) return "";
         if (value.contains(",") || value.contains("\"") || value.contains("\n")) {
             return "\"" + value.replace("\"", "\"\"") + "\"";
         }

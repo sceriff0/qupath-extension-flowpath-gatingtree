@@ -194,7 +194,9 @@ public class GateEditorPane extends VBox {
         excludeOutliersBox.setStyle("-fx-text-fill: white;");
         excludeOutliersBox.setTooltip(new Tooltip(
             "When enabled, cells with marker values outside the clip percentile range\n" +
-            "are classified as 'Excluded' and removed from gating and CSV export.\n" +
+            "are classified as 'Excluded' in QuPath and flagged Outlier=True in the CSV.\n" +
+            "Their would-have-been phenotype is still written to the CSV but they don't\n" +
+            "contribute to branch counts.\n" +
             "Percentiles are computed from all quality-passing cells, not per gate population."));
 
         clipLowSpinner.valueProperty().addListener((obs, old, val) -> {

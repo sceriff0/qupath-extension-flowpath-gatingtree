@@ -151,10 +151,13 @@ class EndToEndGatingCsvTest {
         // Root: CD45 threshold=5 (raw)
         // Child on CD45+ branch: CD3 threshold=3 (raw)
         //
-        // Cell 0: CD45=1, CD3=1 -> CD45- (phenotype=CD45-, CD45_sign=-, CD3_sign=empty)
+        // Cell 0: CD45=1, CD3=1 -> CD45- (phenotype=CD45-, CD45_sign=-, CD3_sign=- because CD3 raw=1 < threshold 3)
         // Cell 1: CD45=6, CD3=2 -> CD45+ then CD3- (phenotype=CD3-, CD45_sign=+, CD3_sign=-)
         // Cell 2: CD45=7, CD3=4 -> CD45+ then CD3+ (phenotype=CD3+, CD45_sign=+, CD3_sign=+)
         // Cell 3: CD45=8, CD3=5 -> CD45+ then CD3+ (phenotype=CD3+, CD45_sign=+, CD3_sign=+)
+        // Note: _sign is now an independent positivity call per marker (any threshold passed = "+"),
+        // not "what role did this marker play in the leaf path". Cell 0's CD3 is below the tree's
+        // CD3 threshold, so CD3_sign="-" even though the cell's leaf phenotype didn't traverse the CD3 gate.
         List<String> markers = List.of("CD45", "CD3");
         double[][] values = { {1, 6, 7, 8}, {1, 2, 4, 5} };
         CellIndex index = buildIndex(markers, values, null);
@@ -175,7 +178,7 @@ class EndToEndGatingCsvTest {
 
         assertEquals("CD45-", csv.cellValue(0, "phenotype"));
         assertEquals("-", csv.cellValue(0, "CD45_sign"));
-        assertEquals("", csv.cellValue(0, "CD3_sign")); // not gated
+        assertEquals("-", csv.cellValue(0, "CD3_sign")); // CD3 raw=1 < tree threshold 3
 
         assertEquals("CD3-", csv.cellValue(1, "phenotype"));
         assertEquals("+", csv.cellValue(1, "CD45_sign"));
@@ -449,15 +452,17 @@ class EndToEndGatingCsvTest {
         CsvResult csv = runPipeline(tree, index, stats, "three_level.csv");
         assertEquals(4, csv.rows.size());
 
+        // _sign is now an independent positivity call: every marker that has a
+        // threshold somewhere in the tree is evaluated against the cell's raw value.
         assertEquals("CD45-", csv.cellValue(0, "phenotype"));
         assertEquals("-", csv.cellValue(0, "CD45_sign"));
-        assertEquals("", csv.cellValue(0, "CD3_sign"));
-        assertEquals("", csv.cellValue(0, "CD8_sign"));
+        assertEquals("-", csv.cellValue(0, "CD3_sign")); // raw 1 < threshold 3
+        assertEquals("-", csv.cellValue(0, "CD8_sign")); // raw 1 < threshold 4
 
         assertEquals("CD3-", csv.cellValue(1, "phenotype"));
         assertEquals("+", csv.cellValue(1, "CD45_sign"));
         assertEquals("-", csv.cellValue(1, "CD3_sign"));
-        assertEquals("", csv.cellValue(1, "CD8_sign"));
+        assertEquals("-", csv.cellValue(1, "CD8_sign")); // raw 1 < threshold 4
 
         assertEquals("CD8-", csv.cellValue(2, "phenotype"));
         assertEquals("+", csv.cellValue(2, "CD45_sign"));

@@ -266,10 +266,12 @@ class PhenotypeCsvExporterTest {
         assertTrue(cd45SignCol >= 0, "CD45_sign column should exist");
         assertTrue(cd3SignCol >= 0, "CD3_sign column should exist");
 
-        // cell0: CD45-, phenotype="CD45-" -> CD45 sign="-", CD3 sign="" (not gated)
+        // cell0: CD45-, phenotype="CD45-" -> CD45 sign="-".
+        // CD3 has a threshold (3.0) somewhere in the tree, and cell0's CD3 raw=1 < 3,
+        // so CD3 sign="-" — independent of whether the cell's leaf path traversed CD3.
         List<String> row0 = parseCsvLine(lines.get(1));
         assertEquals("-", row0.get(cd45SignCol), "Cell 0 CD45_sign should be -");
-        assertEquals("", row0.get(cd3SignCol), "Cell 0 CD3_sign should be empty (not gated on CD3)");
+        assertEquals("-", row0.get(cd3SignCol), "Cell 0 CD3_sign should be - (raw=1 < threshold 3)");
 
         // cell1: CD3-, phenotype="CD3-" -> CD45 sign="+", CD3 sign="-"
         List<String> row1 = parseCsvLine(lines.get(2));
