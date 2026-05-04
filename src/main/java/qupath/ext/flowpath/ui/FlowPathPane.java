@@ -297,9 +297,16 @@ public class FlowPathPane extends BorderPane {
         previewService.setGateTree(gateTree);
         previewService.setImageData(imageData);
         previewService.setOnStatsRecomputed(() -> {
+            // Keep this pane's markerStats in sync with the preview service.
+            // computeAncestorMask (line 608) and the CSV exporter (line 912+)
+            // both consult this field; when the annotation filter narrows the
+            // stats population, ancestors that excludeOutliers reject every
+            // cell otherwise — the editor shows "No data" while the gate-engine
+            // count, computed with fresh stats, still reads the true number.
+            this.markerStats = previewService.getMarkerStats();
             recomputeQualityMask();
             refreshAncestorMask();
-            editorPane.setMarkerStats(previewService.getMarkerStats());
+            editorPane.setMarkerStats(this.markerStats);
         });
 
         // Listen for annotation changes (add/remove) to recompute ROI mask
