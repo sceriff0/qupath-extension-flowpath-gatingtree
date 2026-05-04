@@ -1100,26 +1100,35 @@ public class GateEditorPane extends VBox {
             displayValues = rawValues;
         }
 
-        double[] sorted = displayValues.clone();
-        java.util.Arrays.sort(sorted);
-        double clipLo = percentile(sorted, currentNode.getClipPercentileLow());
-        double clipHi = percentile(sorted, currentNode.getClipPercentileHigh());
+        // Anchor the histogram clip range on global per-marker percentiles so
+        // the same axis is used for this channel everywhere it appears in the
+        // gate tree. When the parent-filtered cells sit outside this range
+        // (e.g. a 0.5% tail population on a correlated child marker), the
+        // histogram's "X cells outside clip range" message at
+        // HistogramCanvas:184-198 informs the user — they can widen the clip
+        // percentiles if they want to gate inside the tail.
+        double pctLo = currentNode.getClipPercentileLow();
+        double pctHi = currentNode.getClipPercentileHigh();
+        double clipLo = markerStats != null ? markerStats.getPercentileValue(channel, pctLo) : Double.NaN;
+        double clipHi = markerStats != null ? markerStats.getPercentileValue(channel, pctHi) : Double.NaN;
+        if (useZ && markerStats != null && markerStats.getStd(channel) > 1e-10) {
+            clipLo = markerStats.toZScore(channel, clipLo);
+            clipHi = markerStats.toZScore(channel, clipHi);
+        }
 
-        // Guard against degenerate clip ranges that would leave every bin empty
-        // (narrow distributions after cascaded threshold gates, or stale clip
-        // percentiles inherited from an earlier population). Fall back to the
-        // actual data range so the histogram remains informative instead of
-        // rendering the misleading "No data" message while cells exist.
-        if (displayValues.length > 0) {
+        // Defensive fallback only when the global percentile is unusable
+        // (channel constant in full population, or markerStats unavailable).
+        boolean badGlobal = Double.isNaN(clipLo) || Double.isNaN(clipHi) || !(clipHi > clipLo);
+        if (badGlobal && displayValues.length > 0) {
+            double[] sorted = displayValues.clone();
+            java.util.Arrays.sort(sorted);
             double dataMin = sorted[0];
             double dataMax = sorted[sorted.length - 1];
-            boolean degenerate = !(clipHi > clipLo)
-                    || Double.isNaN(clipLo) || Double.isNaN(clipHi)
-                    || dataMax < clipLo || dataMin > clipHi;
-            if (degenerate) {
-                clipLo = dataMin;
-                clipHi = dataMax > dataMin ? dataMax : dataMin + 1;
-            }
+            clipLo = dataMin;
+            clipHi = dataMax > dataMin ? dataMax : dataMin + 1;
+        } else if (badGlobal) {
+            clipLo = 0;
+            clipHi = 1;
         }
         final double clipMin = clipLo;
         final double clipMax = clipHi;
@@ -1133,16 +1142,6 @@ public class GateEditorPane extends VBox {
             currentThresholdSlider.setMax(clipMax);
         });
         updatePopulationCounts();
-    }
-
-    private double percentile(double[] sorted, double pct) {
-        if (sorted.length == 0) return 0;
-        double idx = (pct / 100.0) * (sorted.length - 1);
-        int lo = (int) Math.floor(idx);
-        int hi = (int) Math.ceil(idx);
-        if (lo == hi || hi >= sorted.length) return sorted[Math.min(lo, sorted.length - 1)];
-        double frac = idx - lo;
-        return sorted[lo] * (1 - frac) + sorted[hi] * frac;
     }
 
     private boolean isThresholdGate(GateNode node) {

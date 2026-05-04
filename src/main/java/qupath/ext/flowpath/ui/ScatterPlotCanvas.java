@@ -464,17 +464,25 @@ public class ScatterPlotCanvas extends Canvas {
         double plotW = w - PADDING_LEFT - PADDING_RIGHT;
         double plotH = h - PADDING_TOP - PADDING_BOTTOM;
 
-        // Draw dots
+        // Draw dots — skip points outside the axis range so they don't smear
+        // onto axis labels or the canvas border. Track drawn vs. input count
+        // so we can surface "outside clip range" messaging when none render.
         int step = Math.max(1, xValues.length / MAX_DISPLAY_POINTS);
         double eMinX = effectiveMinX(), eMaxX = effectiveMaxX();
         double eMinY = effectiveMinY(), eMaxY = effectiveMaxY();
+        int validInput = 0;
+        int pointsDrawn = 0;
         for (int i = 0; i < xValues.length; i += step) {
             if (Double.isNaN(xValues[i]) || Double.isNaN(yValues[i])) continue;
+            validInput++;
+            if (xValues[i] < eMinX || xValues[i] > eMaxX
+                    || yValues[i] < eMinY || yValues[i] > eMaxY) continue;
             double px = PADDING_LEFT + valueToPixel(xValues[i], eMinX, eMaxX, plotW);
             double py = PADDING_TOP + plotH - valueToPixel(yValues[i], eMinY, eMaxY, plotH);
 
             gc.setFill(getPointColor(xValues[i], yValues[i]));
             gc.fillOval(px - DOT_SIZE / 2, py - DOT_SIZE / 2, DOT_SIZE, DOT_SIZE);
+            pointsDrawn++;
         }
 
         // Draw gate overlay
@@ -500,6 +508,20 @@ public class ScatterPlotCanvas extends Canvas {
         gc.rotate(-90);
         gc.fillText(labelY, 0, 0);
         gc.restore();
+
+        // Cells exist but all sit outside the current clip percentile range
+        // (common for tail populations on a correlated child marker). Tell
+        // the user instead of leaving the plot apparently empty — they can
+        // widen the gate's clip percentiles to see the data.
+        if (validInput > 0 && pointsDrawn == 0) {
+            gc.setFill(Color.gray(0.7));
+            gc.setFont(Font.font(12));
+            String msg = String.format("%,d cells outside %s / %s clip range",
+                    validInput, labelX, labelY);
+            double approxW = msg.length() * 6.5;
+            double centerX = PADDING_LEFT + plotW / 2 - approxW / 2;
+            gc.fillText(msg, Math.max(PADDING_LEFT + 4, centerX), PADDING_TOP + plotH / 2);
+        }
     }
 
     private Color getPointColor(double x, double y) {
