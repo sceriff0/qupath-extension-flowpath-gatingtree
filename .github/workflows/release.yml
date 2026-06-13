@@ -24,8 +24,16 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # JavaFX needs a display + GTK/GL libs even for unit tests that construct
+      # controls. xvfb provides a virtual framebuffer so the real toolkit starts
+      # headlessly (preferred over Monocle, which has no JavaFX 25-matched build).
+      - name: Install headless display deps
+        run: sudo apt-get update && sudo apt-get install -y xvfb libgl1 libgtk-3-0
+
       - name: Build and test
-        run: ./gradlew build
+        env:
+          FLOWPATH_FX_REQUIRED: "true"   # fail loudly if the xvfb display breaks
+        run: xvfb-run --auto-servernum ./gradlew build
 
       - name: Upload test results
         uses: dorny/test-reporter@v1

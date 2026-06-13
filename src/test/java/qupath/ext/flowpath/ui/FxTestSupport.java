@@ -21,8 +21,30 @@ final class FxTestSupport {
 
     private static Boolean available;
 
-    /** Start the FX toolkit if it isn't already; cache whether it's usable. */
+    /**
+     * Start the FX toolkit if it isn't already; cache whether it's usable.
+     *
+     * <p>When {@code FLOWPATH_FX_REQUIRED=true} (set by CI, which provides a
+     * virtual display via xvfb), an unavailable toolkit is a hard error rather
+     * than a skip — otherwise a broken display setup would silently skip every
+     * UI test and leave CI falsely green.
+     */
     static synchronized boolean toolkitAvailable() {
+        boolean ready = computeAvailable();
+        if (!ready && fxRequired()) {
+            throw new IllegalStateException(
+                "JavaFX toolkit unavailable but FLOWPATH_FX_REQUIRED=true — the headless "
+                + "display (xvfb) is not working, so UI tests would silently skip. Failing loudly.");
+        }
+        return ready;
+    }
+
+    private static boolean fxRequired() {
+        return "true".equalsIgnoreCase(System.getenv("FLOWPATH_FX_REQUIRED"))
+                || Boolean.getBoolean("flowpath.fx.required");
+    }
+
+    private static boolean computeAvailable() {
         if (available != null) return available;
         try {
             CountDownLatch latch = new CountDownLatch(1);
