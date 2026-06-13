@@ -9,20 +9,26 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
+import javafx.collections.FXCollections;
+import javafx.util.StringConverter;
 import qupath.ext.flowpath.model.Branch;
 import qupath.ext.flowpath.model.CellIndex;
 import qupath.ext.flowpath.model.ColorUtils;
+import qupath.ext.flowpath.model.Compartment;
+import qupath.ext.flowpath.model.CompartmentCapability;
 import qupath.ext.flowpath.model.EllipseGate;
 import qupath.ext.flowpath.model.GateNode;
 import qupath.ext.flowpath.model.MarkerStats;
 import qupath.ext.flowpath.model.PolygonGate;
 import qupath.ext.flowpath.model.QuadrantGate;
 import qupath.ext.flowpath.model.RectangleGate;
+import qupath.ext.flowpath.model.Statistic;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
+import java.util.function.Supplier;
 
 /**
  * Right-side editor panel for configuring a single gate node.
@@ -49,6 +55,7 @@ public class GateEditorPane extends VBox {
     private GateNode currentNode;
     private CellIndex cellIndex;
     private MarkerStats markerStats;
+    private CompartmentCapability compartmentCapability;
     private boolean[] roiMask;
     private boolean[] ancestorMask;
     private boolean suppressEvents = false;
@@ -276,8 +283,9 @@ public class GateEditorPane extends VBox {
                 }
                 updateHistogram();
                 fireNodeChanged();
-                // Refresh branch names in editor
-                buildBranchNamesEditor(currentNode);
+                // Rebuild the editor so the signal-type selector reflects the new channel's
+                // available compartments (and a now-unavailable compartment falls back safely).
+                setGateNode(currentNode);
             }
         });
         // Assemble
@@ -366,6 +374,9 @@ public class GateEditorPane extends VBox {
         chLabel.setStyle("-fx-text-fill: white;");
         HBox channelRow = new HBox(8, chLabel, channelCombo);
         channelCombo.setValue(node.getChannel());
+        addCompartmentControls(channelRow, node.getChannel(),
+                node::getCompartment, node::setCompartment,
+                node::getStatistic, node::setStatistic);
 
         HBox modeRow = new HBox(12, new Label("Mode:") {{ setStyle("-fx-text-fill: white;"); }}, rawModeBtn, zscoreModeBtn);
         if (node.isThresholdIsZScore()) zscoreModeBtn.setSelected(true);
@@ -541,8 +552,15 @@ public class GateEditorPane extends VBox {
         if (gate.isThresholdIsZScore()) zscoreModeBtn.setSelected(true);
         else rawModeBtn.setSelected(true);
 
+        HBox rowX = new HBox(8, chXLabel, chXCombo);
+        addCompartmentControls(rowX, gate.getChannelX(),
+                gate::getCompartmentX, gate::setCompartmentX, gate::getStatisticX, gate::setStatisticX);
+        HBox rowY = new HBox(8, chYLabel, chYCombo);
+        addCompartmentControls(rowY, gate.getChannelY(),
+                gate::getCompartmentY, gate::setCompartmentY, gate::getStatisticY, gate::setStatisticY);
+
         gateSpecificArea.getChildren().addAll(
-            new HBox(8, chXLabel, chXCombo), new HBox(8, chYLabel, chYCombo),
+            rowX, rowY,
             modeRow,
             createSectionHeader("Threshold X"), new HBox(8, sliderX, valX),
             createSectionHeader("Threshold Y"), new HBox(8, sliderY, valY)
@@ -940,6 +958,84 @@ public class GateEditorPane extends VBox {
     // ---- Public API ----
 
     public void setChannelNames(List<String> names) { channelCombo.getItems().setAll(names); }
+
+    /** Per-compartment availability for the loaded image (drives the signal-type selectors). */
+    public void setCompartmentCapability(CompartmentCapability capability) {
+        this.compartmentCapability = capability;
+    }
+
+    /**
+     * Append a "Signal:" compartment selector (and, when expanded statistics exist, a
+     * statistic selector) to {@code row} for the given channel, wired to the gate via the
+     * supplied getters/setters. No-op when the GeoJSON is legacy or the channel has no
+     * per-compartment measurements — the gate then stays on whole-cell mean.
+     */
+    private void addCompartmentControls(HBox row, String channel,
+                                        Supplier<Compartment> getComp, Consumer<Compartment> setComp,
+                                        Supplier<Statistic> getStat, Consumer<Statistic> setStat) {
+        if (compartmentCapability == null || channel == null
+                || !compartmentCapability.hasCompartments(channel)) {
+            // Legacy / no rich data: pin to whole-cell mean, show nothing.
+            setComp.accept(Compartment.WHOLE_CELL);
+            setStat.accept(Statistic.MEAN);
+            return;
+        }
+
+        // Compartment selector (enum order: Nuclear, Cytoplasmic, Whole-cell).
+        List<Compartment> comps = new ArrayList<>();
+        for (Compartment c : Compartment.values()) {
+            if (compartmentCapability.compartmentsFor(channel).contains(c)) comps.add(c);
+        }
+        Compartment selComp = comps.contains(getComp.get()) ? getComp.get() : Compartment.WHOLE_CELL;
+        if (!comps.contains(selComp)) selComp = comps.get(comps.size() - 1);
+        setComp.accept(selComp);
+
+        ComboBox<Compartment> compCombo = new ComboBox<>(FXCollections.observableArrayList(comps));
+        compCombo.setValue(selComp);
+        compCombo.setConverter(new StringConverter<>() {
+            @Override public String toString(Compartment c) { return c == null ? "" : c.displayName(); }
+            @Override public Compartment fromString(String s) { return null; }
+        });
+        compCombo.setTooltip(new Tooltip("Signal compartment for " + channel));
+        compCombo.setOnAction(e -> {
+            if (!suppressEvents && currentNode != null) {
+                setComp.accept(compCombo.getValue());
+                updateHistogram();
+                fireNodeChanged();
+            }
+        });
+        Label sigLabel = new Label("Signal:");
+        sigLabel.setStyle("-fx-text-fill: white;");
+        row.getChildren().addAll(sigLabel, compCombo);
+
+        // Statistic selector — only when expanded quantification gave more than one stat.
+        List<Statistic> stats = new ArrayList<>();
+        for (Statistic s : Statistic.values()) {
+            if (compartmentCapability.statisticsFor(channel).contains(s)) stats.add(s);
+        }
+        if (stats.size() > 1) {
+            Statistic selStat = stats.contains(getStat.get()) ? getStat.get() : Statistic.MEAN;
+            if (!stats.contains(selStat)) selStat = stats.get(0);
+            setStat.accept(selStat);
+            ComboBox<Statistic> statCombo = new ComboBox<>(FXCollections.observableArrayList(stats));
+            statCombo.setValue(selStat);
+            statCombo.setConverter(new StringConverter<>() {
+                @Override public String toString(Statistic s) { return s == null ? "" : s.displayName(); }
+                @Override public Statistic fromString(String s) { return null; }
+            });
+            statCombo.setTooltip(new Tooltip("Summary statistic for " + channel));
+            statCombo.setOnAction(e -> {
+                if (!suppressEvents && currentNode != null) {
+                    setStat.accept(statCombo.getValue());
+                    updateHistogram();
+                    fireNodeChanged();
+                }
+            });
+            row.getChildren().add(statCombo);
+        } else {
+            setStat.accept(Statistic.MEAN);
+        }
+    }
     public void setCellIndex(CellIndex index) { this.cellIndex = index; }
     public void setMarkerStats(MarkerStats stats) {
         this.markerStats = stats;

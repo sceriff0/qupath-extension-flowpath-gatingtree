@@ -8,7 +8,9 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import qupath.ext.flowpath.model.Branch;
 import qupath.ext.flowpath.model.ColorUtils;
+import qupath.ext.flowpath.model.Compartment;
 import qupath.ext.flowpath.model.GateNode;
+import qupath.ext.flowpath.model.Statistic;
 import qupath.ext.flowpath.model.GateTree;
 import qupath.ext.flowpath.model.EllipseGate;
 import qupath.ext.flowpath.model.PolygonGate;
@@ -31,7 +33,9 @@ import java.util.List;
  */
 public class FlowPathSerializer {
 
-    private static final int CURRENT_VERSION = 1;
+    // v2 adds per-channel compartment + statistic on threshold and quadrant gates.
+    // v1 files load unchanged (compartment defaults to whole-cell, statistic to mean).
+    private static final int CURRENT_VERSION = 2;
 
     private FlowPathSerializer() {
         // static utility class
@@ -222,6 +226,10 @@ public class FlowPathSerializer {
             obj.addProperty("thresholdX", qg.getThresholdX());
             obj.addProperty("thresholdY", qg.getThresholdY());
             obj.addProperty("thresholdIsZScore", qg.isThresholdIsZScore());
+            obj.addProperty("compartmentX", qg.getCompartmentX().name());
+            obj.addProperty("compartmentY", qg.getCompartmentY().name());
+            obj.addProperty("statisticX", qg.getStatisticX().name());
+            obj.addProperty("statisticY", qg.getStatisticY().name());
             // Serialize 4 branches
             JsonArray branches = new JsonArray();
             for (Branch b : qg.getBranches()) {
@@ -237,6 +245,8 @@ public class FlowPathSerializer {
             obj.addProperty("channel", node.getChannel());
             obj.addProperty("threshold", node.getThreshold());
             obj.addProperty("thresholdIsZScore", node.isThresholdIsZScore());
+            obj.addProperty("compartment", node.getCompartment().name());
+            obj.addProperty("statistic", node.getStatistic().name());
             obj.addProperty("positiveName", node.getPositiveName());
             obj.addProperty("negativeName", node.getNegativeName());
             obj.add("positiveColor", ColorUtils.toJsonArray(node.getPositiveColor()));
@@ -288,6 +298,22 @@ public class FlowPathSerializer {
         return result;
     }
 
+    /** Parse a Compartment enum from a property, defaulting to whole-cell (v1 / unknown). */
+    private static Compartment parseCompartment(JsonObject obj, String key) {
+        if (obj.has(key)) {
+            try { return Compartment.valueOf(obj.get(key).getAsString()); } catch (Exception ignored) {}
+        }
+        return Compartment.WHOLE_CELL;
+    }
+
+    /** Parse a Statistic enum from a property, defaulting to mean (v1 / unknown). */
+    private static Statistic parseStatistic(JsonObject obj, String key) {
+        if (obj.has(key)) {
+            try { return Statistic.valueOf(obj.get(key).getAsString()); } catch (Exception ignored) {}
+        }
+        return Statistic.MEAN;
+    }
+
     private static GateNode deserializeThresholdNode(JsonObject obj,
                                                       double clipLow, double clipHigh, boolean excludeOutliers) throws IOException {
         GateNode node = new GateNode();
@@ -301,6 +327,8 @@ public class FlowPathSerializer {
             node.setThreshold(obj.get("threshold").getAsDouble());
         if (obj.has("thresholdIsZScore"))
             node.setThresholdIsZScore(obj.get("thresholdIsZScore").getAsBoolean());
+        node.setCompartment(parseCompartment(obj, "compartment"));
+        node.setStatistic(parseStatistic(obj, "statistic"));
         if (obj.has("positiveName"))
             node.setPositiveName(obj.get("positiveName").getAsString());
         if (obj.has("negativeName"))
@@ -334,6 +362,10 @@ public class FlowPathSerializer {
             gate.setThresholdY(obj.get("thresholdY").getAsDouble());
         if (obj.has("thresholdIsZScore"))
             gate.setThresholdIsZScore(obj.get("thresholdIsZScore").getAsBoolean());
+        gate.setCompartmentX(parseCompartment(obj, "compartmentX"));
+        gate.setCompartmentY(parseCompartment(obj, "compartmentY"));
+        gate.setStatisticX(parseStatistic(obj, "statisticX"));
+        gate.setStatisticY(parseStatistic(obj, "statisticY"));
 
         if (obj.has("branches")) {
             JsonArray branches = obj.getAsJsonArray("branches");

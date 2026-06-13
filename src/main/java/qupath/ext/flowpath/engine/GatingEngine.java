@@ -2,7 +2,9 @@ package qupath.ext.flowpath.engine;
 
 import qupath.ext.flowpath.model.Branch;
 import qupath.ext.flowpath.model.CellIndex;
+import qupath.ext.flowpath.model.Compartment;
 import qupath.ext.flowpath.model.GateNode;
+import qupath.ext.flowpath.model.Statistic;
 import qupath.ext.flowpath.model.GateTree;
 import qupath.ext.flowpath.model.MarkerStats;
 import qupath.ext.flowpath.model.QualityFilter;
@@ -136,6 +138,9 @@ public final class GatingEngine {
         boolean[] outOfAnnotation = new boolean[n];
         boolean[] outlier = new boolean[n];
         int[] colors = new int[n];
+
+        // 0. Register stats for any compartment/statistic columns the tree uses.
+        prepareResolvedColumns(tree.getRoots(), index, stats);
 
         // 1. Initialize all as Unclassified
         for (int i = 0; i < n; i++) {
@@ -301,6 +306,9 @@ public final class GatingEngine {
         int n = index.size();
         boolean[] mask = new boolean[n];
 
+        // Register stats for any compartment columns referenced by ancestor gates.
+        prepareResolvedColumns(tree.getRoots(), index, stats);
+
         // Find the path from root to the target node
         java.util.List<Object> path = new java.util.ArrayList<>();
         if (!findPath(tree.getRoots(), target, path)) {
@@ -376,44 +384,50 @@ public final class GatingEngine {
     private static int evaluateGate(GateNode node, int cellIdx,
                                      CellIndex index, MarkerStats stats, boolean useZScore) {
         if (node instanceof QuadrantGate qg) {
-            int mxIdx = index.getMarkerIndex(qg.getChannelX());
-            int myIdx = index.getMarkerIndex(qg.getChannelY());
-            if (mxIdx < 0 || myIdx < 0) return -1;
-            double rawX = index.getMarkerValues(mxIdx)[cellIdx];
-            double rawY = index.getMarkerValues(myIdx)[cellIdx];
+            String chX = qg.getChannelX();
+            String chY = qg.getChannelY();
+            if (index.getMarkerIndex(chX) < 0 || index.getMarkerIndex(chY) < 0) return -1;
+            String keyX = index.resolvedKey(chX, qg.getCompartmentX(), qg.getStatisticX());
+            String keyY = index.resolvedKey(chY, qg.getCompartmentY(), qg.getStatisticY());
+            double rawX = index.getResolvedColumn(chX, qg.getCompartmentX(), qg.getStatisticX())[cellIdx];
+            double rawY = index.getResolvedColumn(chY, qg.getCompartmentY(), qg.getStatisticY())[cellIdx];
             if (node.isExcludeOutliers()) {
-                double loX = stats.getPercentileValue(qg.getChannelX(), node.getClipPercentileLow());
-                double hiX = stats.getPercentileValue(qg.getChannelX(), node.getClipPercentileHigh());
+                double loX = stats.getPercentileValue(keyX, node.getClipPercentileLow());
+                double hiX = stats.getPercentileValue(keyX, node.getClipPercentileHigh());
                 if (!Double.isNaN(loX) && !Double.isNaN(hiX) && (rawX < loX || rawX > hiX)) return -1;
-                double loY = stats.getPercentileValue(qg.getChannelY(), node.getClipPercentileLow());
-                double hiY = stats.getPercentileValue(qg.getChannelY(), node.getClipPercentileHigh());
+                double loY = stats.getPercentileValue(keyY, node.getClipPercentileLow());
+                double hiY = stats.getPercentileValue(keyY, node.getClipPercentileHigh());
                 if (!Double.isNaN(loY) && !Double.isNaN(hiY) && (rawY < loY || rawY > hiY)) return -1;
             }
             // Use each gate's own z-score flag for consistent evaluation
             boolean gateZScore = qg.isThresholdIsZScore();
-            double cx = gateZScore ? stats.toZScore(qg.getChannelX(), rawX) : rawX;
-            double cy = gateZScore ? stats.toZScore(qg.getChannelY(), rawY) : rawY;
+            double cx = gateZScore ? stats.toZScore(keyX, rawX) : rawX;
+            double cy = gateZScore ? stats.toZScore(keyY, rawY) : rawY;
             return qg.evaluateQuadrant(cx, cy);
         } else if (node instanceof PolygonGate || node instanceof RectangleGate || node instanceof EllipseGate) {
             List<String> channels = node.getChannels();
             if (channels.size() < 2) return -1;
-            int mxIdx = index.getMarkerIndex(channels.get(0));
-            int myIdx = index.getMarkerIndex(channels.get(1));
-            if (mxIdx < 0 || myIdx < 0) return -1;
-            double rawX = index.getMarkerValues(mxIdx)[cellIdx];
-            double rawY = index.getMarkerValues(myIdx)[cellIdx];
+            String chX = channels.get(0);
+            String chY = channels.get(1);
+            if (index.getMarkerIndex(chX) < 0 || index.getMarkerIndex(chY) < 0) return -1;
+            Compartment cX = compAt(node, 0), cY = compAt(node, 1);
+            Statistic sX = statAt(node, 0), sY = statAt(node, 1);
+            String keyX = index.resolvedKey(chX, cX, sX);
+            String keyY = index.resolvedKey(chY, cY, sY);
+            double rawX = index.getResolvedColumn(chX, cX, sX)[cellIdx];
+            double rawY = index.getResolvedColumn(chY, cY, sY)[cellIdx];
             if (node.isExcludeOutliers()) {
-                double loX = stats.getPercentileValue(channels.get(0), node.getClipPercentileLow());
-                double hiX = stats.getPercentileValue(channels.get(0), node.getClipPercentileHigh());
+                double loX = stats.getPercentileValue(keyX, node.getClipPercentileLow());
+                double hiX = stats.getPercentileValue(keyX, node.getClipPercentileHigh());
                 if (!Double.isNaN(loX) && !Double.isNaN(hiX) && (rawX < loX || rawX > hiX)) return -1;
-                double loY = stats.getPercentileValue(channels.get(1), node.getClipPercentileLow());
-                double hiY = stats.getPercentileValue(channels.get(1), node.getClipPercentileHigh());
+                double loY = stats.getPercentileValue(keyY, node.getClipPercentileLow());
+                double hiY = stats.getPercentileValue(keyY, node.getClipPercentileHigh());
                 if (!Double.isNaN(loY) && !Double.isNaN(hiY) && (rawY < loY || rawY > hiY)) return -1;
             }
             // Use each gate's own z-score flag — boundaries match the scatter plot coordinate space
             boolean gateZScore = node.isThresholdIsZScore();
-            double vx = gateZScore ? stats.toZScore(channels.get(0), rawX) : rawX;
-            double vy = gateZScore ? stats.toZScore(channels.get(1), rawY) : rawY;
+            double vx = gateZScore ? stats.toZScore(keyX, rawX) : rawX;
+            double vy = gateZScore ? stats.toZScore(keyY, rawY) : rawY;
             boolean inside;
             if (node instanceof PolygonGate pg) inside = pg.contains(vx, vy);
             else if (node instanceof RectangleGate rg) inside = rg.contains(vx, vy);
@@ -422,18 +436,58 @@ public final class GatingEngine {
         } else {
             // Threshold gate
             String channel = node.getChannel();
-            int mIdx = index.getMarkerIndex(channel);
-            if (mIdx < 0) return -1;
-            double rawValue = index.getMarkerValues(mIdx)[cellIdx];
+            if (index.getMarkerIndex(channel) < 0) return -1;
+            Compartment c = node.getCompartment();
+            Statistic s = node.getStatistic();
+            String key = index.resolvedKey(channel, c, s);
+            double rawValue = index.getResolvedColumn(channel, c, s)[cellIdx];
             if (node.isExcludeOutliers()) {
-                double lo = stats.getPercentileValue(channel, node.getClipPercentileLow());
-                double hi = stats.getPercentileValue(channel, node.getClipPercentileHigh());
+                double lo = stats.getPercentileValue(key, node.getClipPercentileLow());
+                double hi = stats.getPercentileValue(key, node.getClipPercentileHigh());
                 if (!Double.isNaN(lo) && !Double.isNaN(hi) && (rawValue < lo || rawValue > hi)) return -1;
             }
             // Use each gate's own z-score flag for consistent evaluation
             boolean gateZScore = node.isThresholdIsZScore();
-            double compareValue = gateZScore ? stats.toZScore(channel, rawValue) : rawValue;
+            double compareValue = gateZScore ? stats.toZScore(key, rawValue) : rawValue;
             return compareValue >= node.getThreshold() ? 0 : 1;
+        }
+    }
+
+    // ---- compartment resolution helpers ----
+
+    /** Compartment for a gate's k-th channel (parallel to getChannels()); whole-cell if unspecified. */
+    private static Compartment compAt(GateNode node, int k) {
+        List<Compartment> c = node.getCompartments();
+        return k < c.size() ? c.get(k) : Compartment.WHOLE_CELL;
+    }
+
+    /** Statistic for a gate's k-th channel (parallel to getChannels()); mean if unspecified. */
+    private static Statistic statAt(GateNode node, int k) {
+        List<Statistic> s = node.getStatistics();
+        return k < s.size() ? s.get(k) : Statistic.MEAN;
+    }
+
+    /**
+     * Register {@link MarkerStats} columns for every non-default compartment/statistic
+     * selection referenced by the gate tree, before the per-cell walk. Whole-cell mean
+     * selections resolve to the bare marker key, whose stats already exist.
+     */
+    private static void prepareResolvedColumns(List<GateNode> nodes, CellIndex index, MarkerStats stats) {
+        if (nodes == null || stats == null) return;
+        for (GateNode node : nodes) {
+            List<String> channels = node.getChannels();
+            for (int k = 0; k < channels.size(); k++) {
+                String ch = channels.get(k);
+                Compartment c = compAt(node, k);
+                Statistic s = statAt(node, k);
+                String key = index.resolvedKey(ch, c, s);
+                if (!key.equals(ch) && index.getMarkerIndex(ch) >= 0) {
+                    stats.ensureColumn(key, index.getResolvedColumn(ch, c, s));
+                }
+            }
+            for (Branch b : node.getBranches()) {
+                prepareResolvedColumns(b.getChildren(), index, stats);
+            }
         }
     }
 
@@ -516,13 +570,16 @@ public final class GatingEngine {
             return;
         }
 
-        double rawValue = index.getMarkerValues(markerIdx)[cellIdx];
+        Compartment comp = node.getCompartment();
+        Statistic stat = node.getStatistic();
+        String key = index.resolvedKey(channel, comp, stat);
+        double rawValue = index.getResolvedColumn(channel, comp, stat)[cellIdx];
 
         // Outlier exclusion based on percentile clip bounds — flag but continue walking so
         // the CSV still receives a phenotype for this cell.
         if (node.isExcludeOutliers()) {
-            double lo = stats.getPercentileValue(channel, node.getClipPercentileLow());
-            double hi = stats.getPercentileValue(channel, node.getClipPercentileHigh());
+            double lo = stats.getPercentileValue(key, node.getClipPercentileLow());
+            double hi = stats.getPercentileValue(key, node.getClipPercentileHigh());
             if (!Double.isNaN(lo) && !Double.isNaN(hi) && (rawValue < lo || rawValue > hi)) {
                 outlier[cellIdx] = true;
                 excluded[cellIdx] = true;
@@ -531,7 +588,7 @@ public final class GatingEngine {
 
         // Use each gate's own z-score flag for consistent evaluation
         boolean gateZScore = node.isThresholdIsZScore();
-        double compareValue = gateZScore ? stats.toZScore(channel, rawValue) : rawValue;
+        double compareValue = gateZScore ? stats.toZScore(key, rawValue) : rawValue;
         double threshold = node.getThreshold();
 
         Branch branch;
@@ -550,25 +607,27 @@ public final class GatingEngine {
                                           CellIndex index, MarkerStats stats,
                                           String[] phenotypes, boolean[] excluded, boolean[] outlier,
                                           int[] colors) {
-        int markerIdxX = index.getMarkerIndex(gate.getChannelX());
-        int markerIdxY = index.getMarkerIndex(gate.getChannelY());
-        if (markerIdxX < 0 || markerIdxY < 0) {
+        String chX = gate.getChannelX();
+        String chY = gate.getChannelY();
+        if (index.getMarkerIndex(chX) < 0 || index.getMarkerIndex(chY) < 0) {
             return;
         }
 
-        double rawX = index.getMarkerValues(markerIdxX)[cellIdx];
-        double rawY = index.getMarkerValues(markerIdxY)[cellIdx];
+        String keyX = index.resolvedKey(chX, gate.getCompartmentX(), gate.getStatisticX());
+        String keyY = index.resolvedKey(chY, gate.getCompartmentY(), gate.getStatisticY());
+        double rawX = index.getResolvedColumn(chX, gate.getCompartmentX(), gate.getStatisticX())[cellIdx];
+        double rawY = index.getResolvedColumn(chY, gate.getCompartmentY(), gate.getStatisticY())[cellIdx];
 
         // Outlier exclusion — flag but continue walking
         if (gate.isExcludeOutliers()) {
-            double loX = stats.getPercentileValue(gate.getChannelX(), gate.getClipPercentileLow());
-            double hiX = stats.getPercentileValue(gate.getChannelX(), gate.getClipPercentileHigh());
+            double loX = stats.getPercentileValue(keyX, gate.getClipPercentileLow());
+            double hiX = stats.getPercentileValue(keyX, gate.getClipPercentileHigh());
             if (!Double.isNaN(loX) && !Double.isNaN(hiX) && (rawX < loX || rawX > hiX)) {
                 outlier[cellIdx] = true;
                 excluded[cellIdx] = true;
             }
-            double loY = stats.getPercentileValue(gate.getChannelY(), gate.getClipPercentileLow());
-            double hiY = stats.getPercentileValue(gate.getChannelY(), gate.getClipPercentileHigh());
+            double loY = stats.getPercentileValue(keyY, gate.getClipPercentileLow());
+            double hiY = stats.getPercentileValue(keyY, gate.getClipPercentileHigh());
             if (!Double.isNaN(loY) && !Double.isNaN(hiY) && (rawY < loY || rawY > hiY)) {
                 outlier[cellIdx] = true;
                 excluded[cellIdx] = true;
@@ -577,8 +636,8 @@ public final class GatingEngine {
 
         // Use each gate's own z-score flag for consistent evaluation
         boolean gateZScore = gate.isThresholdIsZScore();
-        double compareX = gateZScore ? stats.toZScore(gate.getChannelX(), rawX) : rawX;
-        double compareY = gateZScore ? stats.toZScore(gate.getChannelY(), rawY) : rawY;
+        double compareX = gateZScore ? stats.toZScore(keyX, rawX) : rawX;
+        double compareY = gateZScore ? stats.toZScore(keyY, rawY) : rawY;
 
         int quadrant = gate.evaluateQuadrant(compareX, compareY);
         Branch branch = gate.getBranches().get(quadrant);
@@ -596,23 +655,25 @@ public final class GatingEngine {
         if (channels.size() < 2) return;
         String chX = channels.get(0);
         String chY = channels.get(1);
-        int mxIdx = index.getMarkerIndex(chX);
-        int myIdx = index.getMarkerIndex(chY);
-        if (mxIdx < 0 || myIdx < 0) return;
+        if (index.getMarkerIndex(chX) < 0 || index.getMarkerIndex(chY) < 0) return;
 
-        double rawX = index.getMarkerValues(mxIdx)[cellIdx];
-        double rawY = index.getMarkerValues(myIdx)[cellIdx];
+        Compartment cX = compAt(node, 0), cY = compAt(node, 1);
+        Statistic sX = statAt(node, 0), sY = statAt(node, 1);
+        String keyX = index.resolvedKey(chX, cX, sX);
+        String keyY = index.resolvedKey(chY, cY, sY);
+        double rawX = index.getResolvedColumn(chX, cX, sX)[cellIdx];
+        double rawY = index.getResolvedColumn(chY, cY, sY)[cellIdx];
 
         // Outlier exclusion (same semantics as threshold/quadrant gates) — flag but continue
         if (node.isExcludeOutliers()) {
-            double loX = stats.getPercentileValue(chX, node.getClipPercentileLow());
-            double hiX = stats.getPercentileValue(chX, node.getClipPercentileHigh());
+            double loX = stats.getPercentileValue(keyX, node.getClipPercentileLow());
+            double hiX = stats.getPercentileValue(keyX, node.getClipPercentileHigh());
             if (!Double.isNaN(loX) && !Double.isNaN(hiX) && (rawX < loX || rawX > hiX)) {
                 outlier[cellIdx] = true;
                 excluded[cellIdx] = true;
             }
-            double loY = stats.getPercentileValue(chY, node.getClipPercentileLow());
-            double hiY = stats.getPercentileValue(chY, node.getClipPercentileHigh());
+            double loY = stats.getPercentileValue(keyY, node.getClipPercentileLow());
+            double hiY = stats.getPercentileValue(keyY, node.getClipPercentileHigh());
             if (!Double.isNaN(loY) && !Double.isNaN(hiY) && (rawY < loY || rawY > hiY)) {
                 outlier[cellIdx] = true;
                 excluded[cellIdx] = true;
@@ -621,8 +682,8 @@ public final class GatingEngine {
 
         // Use each gate's own z-score flag — boundaries match the scatter plot coordinate space
         boolean gateZScore = node.isThresholdIsZScore();
-        double vx = gateZScore ? stats.toZScore(chX, rawX) : rawX;
-        double vy = gateZScore ? stats.toZScore(chY, rawY) : rawY;
+        double vx = gateZScore ? stats.toZScore(keyX, rawX) : rawX;
+        double vy = gateZScore ? stats.toZScore(keyY, rawY) : rawY;
         boolean inside;
         if (node instanceof PolygonGate pg) {
             inside = pg.contains(vx, vy);

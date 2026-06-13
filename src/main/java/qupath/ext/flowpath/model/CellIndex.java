@@ -5,8 +5,12 @@ import qupath.lib.objects.PathObject;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class CellIndex {
+
+    // Lazily-built compartment columns, keyed by resolved measurement key.
+    private final Map<String, double[]> resolvedColumns = new ConcurrentHashMap<>();
 
     private final PathObject[] objects;
     private final String[] markerNames;
@@ -122,6 +126,38 @@ public class CellIndex {
     }
 
     /**
+     * Resolve a marker value for a specific compartment and statistic, using the
+     * QuPath-native key {@code "<channel>: <Compartment>: <Stat>"}.
+     * <p>
+     * Resolution order: exact key, then layer-prefixed key, then — only for
+     * whole-cell mean — the bare {@code channel} key so legacy GeoJSONs (which
+     * carry a single {@code "CD3"} measurement) keep working unchanged. Returns
+     * {@code NaN} if nothing matches.
+     */
+    public static double findMarkerValue(Map<String, Number> measurements, String channel,
+                                         Compartment compartment, Statistic statistic) {
+        Compartment comp = compartment != null ? compartment : Compartment.WHOLE_CELL;
+        Statistic stat = statistic != null ? statistic : Statistic.MEAN;
+
+        String key = MeasurementKeys.build(channel, comp, stat);
+        Number val = measurements.get(key);
+        if (val != null) return val.doubleValue();
+
+        String suffix = "] " + key;
+        for (Map.Entry<String, Number> entry : measurements.entrySet()) {
+            if (entry.getKey().endsWith(suffix) && entry.getValue() != null) {
+                return entry.getValue().doubleValue();
+            }
+        }
+
+        // Backward compatibility: whole-cell mean falls back to the bare marker key.
+        if (comp == Compartment.WHOLE_CELL && stat == Statistic.MEAN) {
+            return findMarkerValue(measurements, channel);
+        }
+        return Double.NaN;
+    }
+
+    /**
      * Find a morphological measurement by key name.
      * Tries exact match, then layer-prefixed "[layer] key", then prefix match
      * (e.g., "area" matches "area µm²"). Returns NaN if not found.
@@ -152,6 +188,45 @@ public class CellIndex {
 
     public double[] getMarkerValues(int markerIndex) {
         return values[markerIndex];
+    }
+
+    /**
+     * The resolved measurement key for a channel + compartment + statistic.
+     * Whole-cell mean resolves to the bare channel name (so legacy/default data
+     * uses the existing column and stats unchanged); other selections use the
+     * {@code "<channel>: <Compartment>: <Stat>"} key.
+     */
+    public String resolvedKey(String channel, Compartment compartment, Statistic statistic) {
+        if (isDefault(compartment, statistic)) return channel;
+        return MeasurementKeys.build(channel, compartment, statistic);
+    }
+
+    /**
+     * Column of per-cell values for a channel + compartment + statistic.
+     * For whole-cell mean this returns the pre-built base column; other selections
+     * build the column from the objects' measurements on first use and cache it.
+     * Returns a NaN-filled column if the channel/compartment is absent.
+     */
+    public double[] getResolvedColumn(String channel, Compartment compartment, Statistic statistic) {
+        int mi = getMarkerIndex(channel);
+        if (isDefault(compartment, statistic) && mi >= 0) {
+            return values[mi];
+        }
+        String key = resolvedKey(channel, compartment, statistic);
+        double[] cached = resolvedColumns.get(key);
+        if (cached != null) return cached;
+
+        double[] col = new double[size];
+        for (int i = 0; i < size; i++) {
+            col[i] = findMarkerValue(getMeasurements(objects[i]), channel, compartment, statistic);
+        }
+        resolvedColumns.put(key, col);
+        return col;
+    }
+
+    private static boolean isDefault(Compartment compartment, Statistic statistic) {
+        return (compartment == null || compartment == Compartment.WHOLE_CELL)
+                && (statistic == null || statistic == Statistic.MEAN);
     }
 
     public int getMarkerIndex(String name) {

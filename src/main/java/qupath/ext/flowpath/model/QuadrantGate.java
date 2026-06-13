@@ -23,6 +23,12 @@ public class QuadrantGate extends GateNode {
     private double thresholdY;
     private boolean thresholdIsZScore = true;
 
+    // Per-axis measurement compartment + statistic (each channel chosen independently).
+    private Compartment compartmentX = Compartment.WHOLE_CELL;
+    private Compartment compartmentY = Compartment.WHOLE_CELL;
+    private Statistic statisticX = Statistic.MEAN;
+    private Statistic statisticY = Statistic.MEAN;
+
     // 4 branches: PP(++), NP(-+), PN(+-), NN(--)
     private final Branch branchPP;
     private final Branch branchNP;
@@ -76,6 +82,22 @@ public class QuadrantGate extends GateNode {
     }
 
     @Override
+    public List<Compartment> getCompartments() {
+        List<Compartment> out = new ArrayList<>();
+        if (channelX != null) out.add(compartmentX);
+        if (channelY != null) out.add(compartmentY);
+        return out;
+    }
+
+    @Override
+    public List<Statistic> getStatistics() {
+        List<Statistic> out = new ArrayList<>();
+        if (channelX != null) out.add(statisticX);
+        if (channelY != null) out.add(statisticY);
+        return out;
+    }
+
+    @Override
     public String getGateType() {
         return "quadrant";
     }
@@ -116,6 +138,31 @@ public class QuadrantGate extends GateNode {
     @Override
     public void setThresholdIsZScore(boolean v) { this.thresholdIsZScore = v; }
 
+    // The base single-channel accessors map to the X axis (mirrors getChannel()).
+    @Override
+    public Compartment getCompartment() { return compartmentX; }
+
+    @Override
+    public void setCompartment(Compartment c) { this.compartmentX = c != null ? c : Compartment.WHOLE_CELL; }
+
+    @Override
+    public Statistic getStatistic() { return statisticX; }
+
+    @Override
+    public void setStatistic(Statistic s) { this.statisticX = s != null ? s : Statistic.MEAN; }
+
+    public Compartment getCompartmentX() { return compartmentX; }
+    public void setCompartmentX(Compartment c) { this.compartmentX = c != null ? c : Compartment.WHOLE_CELL; }
+
+    public Compartment getCompartmentY() { return compartmentY; }
+    public void setCompartmentY(Compartment c) { this.compartmentY = c != null ? c : Compartment.WHOLE_CELL; }
+
+    public Statistic getStatisticX() { return statisticX; }
+    public void setStatisticX(Statistic s) { this.statisticX = s != null ? s : Statistic.MEAN; }
+
+    public Statistic getStatisticY() { return statisticY; }
+    public void setStatisticY(Statistic s) { this.statisticY = s != null ? s : Statistic.MEAN; }
+
     // Branch accessors
     public Branch getBranchPP() { return branchPP; }
     public Branch getBranchNP() { return branchNP; }
@@ -143,6 +190,10 @@ public class QuadrantGate extends GateNode {
         copy.thresholdX = this.thresholdX;
         copy.thresholdY = this.thresholdY;
         copy.thresholdIsZScore = this.thresholdIsZScore;
+        copy.compartmentX = this.compartmentX;
+        copy.compartmentY = this.compartmentY;
+        copy.statisticX = this.statisticX;
+        copy.statisticY = this.statisticY;
         copySharedFieldsTo(copy);
         copyBranchesTo(copy);
         return copy;

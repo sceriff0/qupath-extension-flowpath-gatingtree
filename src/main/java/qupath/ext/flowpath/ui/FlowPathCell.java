@@ -4,6 +4,7 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.Tooltip;
 import javafx.scene.control.TreeCell;
 import javafx.scene.control.TreeItem;
 import javafx.scene.layout.Background;
@@ -17,11 +18,13 @@ import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import qupath.ext.flowpath.model.Branch;
 import qupath.ext.flowpath.model.ColorUtils;
+import qupath.ext.flowpath.model.Compartment;
 import qupath.ext.flowpath.model.EllipseGate;
 import qupath.ext.flowpath.model.GateNode;
 import qupath.ext.flowpath.model.PolygonGate;
 import qupath.ext.flowpath.model.QuadrantGate;
 import qupath.ext.flowpath.model.RectangleGate;
+import qupath.ext.flowpath.model.Statistic;
 
 import java.util.function.Consumer;
 
@@ -109,6 +112,32 @@ public class FlowPathCell extends TreeCell<Object> {
 
     // ---- Gate node: full-width colored bar ------------------------------------------------
 
+    /**
+     * Small coloured pill showing a channel's signal compartment (N/C/W), with the
+     * statistic appended when it is not the default Mean. Returns {@code null} for the
+     * plain whole-cell mean default so unconfigured gates stay visually clean.
+     */
+    private static Label compartmentBadge(Compartment c, Statistic s) {
+        Compartment comp = (c == null) ? Compartment.WHOLE_CELL : c;
+        Statistic stat = (s == null) ? Statistic.MEAN : s;
+        if (comp == Compartment.WHOLE_CELL && stat == Statistic.MEAN) return null;
+
+        String text = comp.abbreviation();
+        if (stat != Statistic.MEAN) text += "·" + stat.displayName().substring(0, 3).toLowerCase();
+        Label badge = new Label(text);
+        badge.setFont(Font.font(null, FontWeight.BOLD, 9));
+        badge.setTextFill(Color.WHITE);
+        Color bg = switch (comp) {
+            case NUCLEAR -> Color.web("#3a6ea5");
+            case CYTOPLASMIC -> Color.web("#4a9a5a");
+            case WHOLE_CELL -> Color.web("#777777");
+        };
+        badge.setBackground(new Background(new BackgroundFill(bg, new CornerRadii(4), Insets.EMPTY)));
+        badge.setPadding(new Insets(0, 4, 0, 4));
+        badge.setTooltip(new Tooltip(comp.displayName() + " · " + stat.displayName()));
+        return badge;
+    }
+
     private HBox buildGateNodeGraphic(GateNode node) {
         HBox bar = new HBox(6);
         bar.setAlignment(Pos.CENTER_LEFT);
@@ -132,9 +161,16 @@ public class FlowPathCell extends TreeCell<Object> {
         });
 
         if (node instanceof QuadrantGate qg) {
-            Label channelLabel = new Label(qg.getChannelX() + " / " + qg.getChannelY());
-            channelLabel.setFont(Font.font(null, FontWeight.BOLD, 13));
-            channelLabel.setTextFill(Color.WHITE);
+            Label chXLabel = new Label(qg.getChannelX());
+            chXLabel.setFont(Font.font(null, FontWeight.BOLD, 13));
+            chXLabel.setTextFill(Color.WHITE);
+            Label sep = new Label("/");
+            sep.setTextFill(Color.web("#a0b0c0"));
+            Label chYLabel = new Label(qg.getChannelY());
+            chYLabel.setFont(Font.font(null, FontWeight.BOLD, 13));
+            chYLabel.setTextFill(Color.WHITE);
+            Label badgeX = compartmentBadge(qg.getCompartmentX(), qg.getStatisticX());
+            Label badgeY = compartmentBadge(qg.getCompartmentY(), qg.getStatisticY());
 
             String threshText = qg.isThresholdIsZScore()
                     ? String.format("X:%.2f Y:%.2f", qg.getThresholdX(), qg.getThresholdY())
@@ -143,7 +179,13 @@ public class FlowPathCell extends TreeCell<Object> {
             threshLabel.setFont(Font.font(null, FontWeight.NORMAL, 10));
             threshLabel.setTextFill(Color.web("#a0b0c0"));
 
-            bar.getChildren().addAll(enabledBox, channelLabel, threshLabel);
+            bar.getChildren().add(enabledBox);
+            bar.getChildren().add(chXLabel);
+            if (badgeX != null) bar.getChildren().add(badgeX);
+            bar.getChildren().add(sep);
+            bar.getChildren().add(chYLabel);
+            if (badgeY != null) bar.getChildren().add(badgeY);
+            bar.getChildren().add(threshLabel);
         } else if (node instanceof PolygonGate pg) {
             Label channelLabel = new Label(pg.getChannelX() + " / " + pg.getChannelY());
             channelLabel.setFont(Font.font(null, FontWeight.BOLD, 13));
@@ -186,7 +228,11 @@ public class FlowPathCell extends TreeCell<Object> {
             thresholdLabel.setFont(Font.font(null, FontWeight.NORMAL, 11));
             thresholdLabel.setTextFill(Color.web("#a0b0c0"));
 
-            bar.getChildren().addAll(enabledBox, channelLabel, thresholdLabel);
+            Label badge = compartmentBadge(node.getCompartment(), node.getStatistic());
+            bar.getChildren().add(enabledBox);
+            bar.getChildren().add(channelLabel);
+            if (badge != null) bar.getChildren().add(badge);
+            bar.getChildren().add(thresholdLabel);
         }
 
         return bar;

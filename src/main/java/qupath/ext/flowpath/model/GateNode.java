@@ -26,6 +26,11 @@ public class GateNode {
     private double threshold;
     private boolean thresholdIsZScore;
 
+    // --- Per-channel measurement compartment + statistic (rich GeoJSON) ---
+    // Default to whole-cell mean, which resolves to the bare marker key on legacy data.
+    private Compartment compartment = Compartment.WHOLE_CELL;
+    private Statistic statistic = Statistic.MEAN;
+
     // Branches: index 0 = positive, index 1 = negative
     private final Branch positiveBranch;
     private final Branch negativeBranch;
@@ -72,6 +77,22 @@ public class GateNode {
     }
 
     /**
+     * Return the per-channel compartments, parallel to {@link #getChannels()}.
+     * Override in subclasses that use multiple channels.
+     */
+    public List<Compartment> getCompartments() {
+        return channel != null ? List.of(compartment) : List.of();
+    }
+
+    /**
+     * Return the per-channel statistics, parallel to {@link #getChannels()}.
+     * Override in subclasses that use multiple channels.
+     */
+    public List<Statistic> getStatistics() {
+        return channel != null ? List.of(statistic) : List.of();
+    }
+
+    /**
      * Gate type discriminator for serialization.
      */
     public String getGateType() {
@@ -102,6 +123,12 @@ public class GateNode {
 
     public boolean isThresholdIsZScore() { return thresholdIsZScore; }
     public void setThresholdIsZScore(boolean v) { this.thresholdIsZScore = v; }
+
+    public Compartment getCompartment() { return compartment; }
+    public void setCompartment(Compartment c) { this.compartment = c != null ? c : Compartment.WHOLE_CELL; }
+
+    public Statistic getStatistic() { return statistic; }
+    public void setStatistic(Statistic s) { this.statistic = s != null ? s : Statistic.MEAN; }
 
     // ========== Backward-compatible branch accessors ==========
 
@@ -160,6 +187,8 @@ public class GateNode {
         target.clipPercentileHigh = this.clipPercentileHigh;
         target.excludeOutliers = this.excludeOutliers;
         target.thresholdIsZScore = this.thresholdIsZScore;
+        target.compartment = this.compartment;
+        target.statistic = this.statistic;
     }
 
     /**

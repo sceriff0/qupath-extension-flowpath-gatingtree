@@ -1,121 +1,126 @@
 package qupath.ext.flowpath.model;
 
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class MarkerStats {
 
     private static final int HISTOGRAM_BINS = 200;
 
-    private final Map<String, double[]> sortedValues;
-    private final Map<String, Double> means;
-    private final Map<String, Double> stds;
-    private final Map<String, Double> mins;
-    private final Map<String, Double> maxs;
-    private final Map<String, double[]> histogramBins;
-    private final Map<String, double[]> histogramCounts;
+    // Keyed by the *resolved* measurement key: a base marker name ("CD3") for
+    // whole-cell/mean, or a compartment key ("CD3: Nucleus: Mean") otherwise.
+    // ConcurrentHashMap so columns can be registered lazily from the background
+    // live-preview thread (see ensureColumn).
+    private final Map<String, double[]> sortedValues = new ConcurrentHashMap<>();
+    private final Map<String, Double> means = new ConcurrentHashMap<>();
+    private final Map<String, Double> stds = new ConcurrentHashMap<>();
+    private final Map<String, Double> mins = new ConcurrentHashMap<>();
+    private final Map<String, Double> maxs = new ConcurrentHashMap<>();
+    private final Map<String, double[]> histogramBins = new ConcurrentHashMap<>();
+    private final Map<String, double[]> histogramCounts = new ConcurrentHashMap<>();
 
-    private MarkerStats(Map<String, double[]> sortedValues,
-                        Map<String, Double> means, Map<String, Double> stds,
-                        Map<String, Double> mins, Map<String, Double> maxs,
-                        Map<String, double[]> histogramBins,
-                        Map<String, double[]> histogramCounts) {
-        this.sortedValues = sortedValues;
-        this.means = means;
-        this.stds = stds;
-        this.mins = mins;
-        this.maxs = maxs;
-        this.histogramBins = histogramBins;
-        this.histogramCounts = histogramCounts;
-    }
+    // Quality mask captured at compute time, so lazily-registered compartment
+    // columns are summarised over the same cell population as the base markers.
+    private boolean[] qualityMask;
+
+    private MarkerStats() {}
 
     public static MarkerStats compute(CellIndex index, boolean[] qualityMask) {
+        MarkerStats s = new MarkerStats();
+        s.qualityMask = qualityMask;
+
         String[] markers = index.getMarkerNames();
-        int n = index.getSize();
-
-        // Count passing cells
-        int passCount = 0;
-        for (int i = 0; i < n; i++) {
-            if (qualityMask[i]) passCount++;
-        }
-
-        Map<String, double[]> sortedValues = new HashMap<>();
-        Map<String, Double> means = new HashMap<>();
-        Map<String, Double> stds = new HashMap<>();
-        Map<String, Double> mins = new HashMap<>();
-        Map<String, Double> maxs = new HashMap<>();
-        Map<String, double[]> histogramBins = new HashMap<>();
-        Map<String, double[]> histogramCounts = new HashMap<>();
-
         for (int m = 0; m < markers.length; m++) {
-            String name = markers[m];
-            double[] raw = index.getMarkerValues(m);
+            s.putColumnStats(markers[m], index.getMarkerValues(m), qualityMask);
+        }
+        return s;
+    }
 
-            // Extract passing values, filtering out NaN (absent markers)
-            int actualCount = 0;
-            for (int i = 0; i < n; i++) {
-                if (qualityMask[i] && !Double.isNaN(raw[i])) actualCount++;
+    /**
+     * Compute and store summary statistics (sorted values, mean, std, min/max,
+     * histogram) for a single column under {@code name}.
+     */
+    private void putColumnStats(String name, double[] raw, boolean[] mask) {
+        int n = raw.length;
+
+        int actualCount = 0;
+        for (int i = 0; i < n; i++) {
+            if ((mask == null || mask[i]) && !Double.isNaN(raw[i])) actualCount++;
+        }
+        double[] passing = new double[actualCount];
+        int idx = 0;
+        for (int i = 0; i < n; i++) {
+            if ((mask == null || mask[i]) && !Double.isNaN(raw[i])) {
+                passing[idx++] = raw[i];
             }
-            double[] passing = new double[actualCount];
-            int idx = 0;
-            for (int i = 0; i < n; i++) {
-                if (qualityMask[i] && !Double.isNaN(raw[i])) {
-                    passing[idx++] = raw[i];
-                }
-            }
-
-            Arrays.sort(passing);
-            sortedValues.put(name, passing);
-
-            if (actualCount == 0) {
-                means.put(name, 0.0);
-                stds.put(name, 0.0);
-                mins.put(name, 0.0);
-                maxs.put(name, 0.0);
-                histogramBins.put(name, new double[HISTOGRAM_BINS + 1]);
-                histogramCounts.put(name, new double[HISTOGRAM_BINS]);
-                continue;
-            }
-
-            double min = passing[0];
-            double max = passing[actualCount - 1];
-            mins.put(name, min);
-            maxs.put(name, max);
-
-            double sum = 0;
-            for (double v : passing) sum += v;
-            double mean = sum / actualCount;
-            means.put(name, mean);
-
-            double sumSq = 0;
-            for (double v : passing) sumSq += (v - mean) * (v - mean);
-            double std = Math.sqrt(sumSq / actualCount);
-            stds.put(name, std);
-
-            // Histogram
-            double[] bins = new double[HISTOGRAM_BINS + 1];
-            double[] counts = new double[HISTOGRAM_BINS];
-            double range = max - min;
-            if (range < 1e-10) range = 1.0;
-            double binWidth = range / HISTOGRAM_BINS;
-
-            for (int b = 0; b <= HISTOGRAM_BINS; b++) {
-                bins[b] = min + b * binWidth;
-            }
-            for (double v : passing) {
-                int bin = (int) ((v - min) / binWidth);
-                if (bin >= HISTOGRAM_BINS) bin = HISTOGRAM_BINS - 1;
-                if (bin < 0) bin = 0;
-                counts[bin]++;
-            }
-
-            histogramBins.put(name, bins);
-            histogramCounts.put(name, counts);
         }
 
-        return new MarkerStats(sortedValues, means, stds, mins, maxs, histogramBins, histogramCounts);
+        Arrays.sort(passing);
+        sortedValues.put(name, passing);
+
+        if (actualCount == 0) {
+            means.put(name, 0.0);
+            stds.put(name, 0.0);
+            mins.put(name, 0.0);
+            maxs.put(name, 0.0);
+            histogramBins.put(name, new double[HISTOGRAM_BINS + 1]);
+            histogramCounts.put(name, new double[HISTOGRAM_BINS]);
+            return;
+        }
+
+        double min = passing[0];
+        double max = passing[actualCount - 1];
+        mins.put(name, min);
+        maxs.put(name, max);
+
+        double sum = 0;
+        for (double v : passing) sum += v;
+        double mean = sum / actualCount;
+        means.put(name, mean);
+
+        double sumSq = 0;
+        for (double v : passing) sumSq += (v - mean) * (v - mean);
+        double std = Math.sqrt(sumSq / actualCount);
+        stds.put(name, std);
+
+        // Histogram
+        double[] bins = new double[HISTOGRAM_BINS + 1];
+        double[] counts = new double[HISTOGRAM_BINS];
+        double range = max - min;
+        if (range < 1e-10) range = 1.0;
+        double binWidth = range / HISTOGRAM_BINS;
+
+        for (int b = 0; b <= HISTOGRAM_BINS; b++) {
+            bins[b] = min + b * binWidth;
+        }
+        for (double v : passing) {
+            int bin = (int) ((v - min) / binWidth);
+            if (bin >= HISTOGRAM_BINS) bin = HISTOGRAM_BINS - 1;
+            if (bin < 0) bin = 0;
+            counts[bin]++;
+        }
+
+        histogramBins.put(name, bins);
+        histogramCounts.put(name, counts);
+    }
+
+    /**
+     * Ensure statistics exist for a resolved compartment column, computed with the
+     * same quality mask used at {@link #compute}. Idempotent and safe to call from
+     * the gating pre-pass on any thread. No-op for keys already present (including
+     * the base markers).
+     */
+    public void ensureColumn(String key, double[] rawColumn) {
+        if (key == null || rawColumn == null) return;
+        if (means.containsKey(key)) return;
+        putColumnStats(key, rawColumn, qualityMask);
+    }
+
+    /** True if statistics for the given resolved key are available. */
+    public boolean hasColumn(String key) {
+        return means.containsKey(key);
     }
 
     public double toZScore(String channel, double rawValue) {

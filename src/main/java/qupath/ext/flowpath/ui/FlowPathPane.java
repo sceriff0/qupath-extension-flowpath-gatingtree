@@ -17,6 +17,8 @@ import qupath.ext.flowpath.io.FlowPathSerializer;
 import qupath.ext.flowpath.io.PhenotypeCsvExporter;
 import qupath.ext.flowpath.model.Branch;
 import qupath.ext.flowpath.model.CellIndex;
+import qupath.ext.flowpath.model.CompartmentCapability;
+import qupath.ext.flowpath.model.MeasurementKeys;
 import qupath.ext.flowpath.model.EllipseGate;
 import qupath.ext.flowpath.model.GateNode;
 import qupath.ext.flowpath.model.GateTree;
@@ -68,6 +70,7 @@ public class FlowPathPane extends BorderPane {
     private CellIndex cellIndex;
     private MarkerStats markerStats;
     private List<String> markerNames;
+    private CompartmentCapability compartmentCapability = CompartmentCapability.empty();
     private boolean[] cachedQualityMask;
     private boolean[] cachedRoiMask;
     private PathObjectHierarchyListener hierarchyListener;
@@ -258,6 +261,10 @@ public class FlowPathPane extends BorderPane {
         // Discover marker names from image channels (OME-TIFF metadata)
         markerNames = discoverMarkerNames(imageData, detections);
 
+        // Detect per-compartment measurements (rich vs legacy GeoJSON) so the editor
+        // can enable/disable compartment + statistic selectors per channel.
+        compartmentCapability = CompartmentCapability.scan(detections, 100);
+
         cellIndex = CellIndex.build(detections, markerNames);
 
         // Compute ROI mask (if filter is enabled)
@@ -269,6 +276,7 @@ public class FlowPathPane extends BorderPane {
 
         // Update UI
         editorPane.setChannelNames(markerNames);
+        editorPane.setCompartmentCapability(compartmentCapability);
         editorPane.setCellIndex(cellIndex);
         editorPane.setRoiMask(cachedRoiMask);
         editorPane.setMarkerStats(markerStats);
@@ -370,13 +378,21 @@ public class FlowPathPane extends BorderPane {
 
         if (measurementKeys.isEmpty()) return Collections.emptyList();
 
+        // Collapse per-compartment keys ("CD3: Nucleus: Mean") down to their base
+        // marker ("CD3") and de-duplicate, so a structured-only GeoJSON (no bare
+        // marker keys) still yields one entry per marker rather than one per compartment.
         return measurementKeys.stream()
+            .map(name -> {
+                MeasurementKeys.Parsed parsed = MeasurementKeys.parse(name);
+                return parsed != null ? parsed.marker() : name;
+            })
             .filter(name -> !name.startsWith("["))
             .filter(name -> !name.startsWith("_"))
             .filter(name -> {
                 String lower = name.toLowerCase();
                 return excludePrefixes.stream().noneMatch(lower::startsWith);
             })
+            .distinct()
             .sorted()
             .collect(Collectors.toList());
     }
