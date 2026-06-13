@@ -195,12 +195,19 @@ public class QualityFilterPane extends TitledPane {
      */
     public void updateRanges(double maxArea, double maxTotalIntensity, double maxPerimeter) {
         suppressEvents = true;
-        areaMinSlider.setMax(maxArea);
-        areaMaxSlider.setMax(maxArea * 1.1);
-        totalIntMinSlider.setMax(maxTotalIntensity);
-        totalIntMaxSlider.setMax(maxTotalIntensity * 1.1);
-        perimMinSlider.setMax(maxPerimeter);
-        perimMaxSlider.setMax(maxPerimeter * 1.1);
+
+        // Capture "off" state BEFORE rescaling so we can re-pin unbounded max
+        // sliders to the top of the new range (see rescaleMaxSlider).
+        boolean areaOff = filter.getMaxArea() == Double.MAX_VALUE;
+        boolean totalIntOff = filter.getMaxTotalIntensity() == Double.MAX_VALUE;
+        boolean perimOff = filter.getMaxPerimeter() == Double.MAX_VALUE;
+
+        rescaleSlider(areaMinSlider, maxArea);
+        rescaleMaxSlider(areaMaxSlider, maxArea * 1.1, areaOff);
+        rescaleSlider(totalIntMinSlider, maxTotalIntensity);
+        rescaleMaxSlider(totalIntMaxSlider, maxTotalIntensity * 1.1, totalIntOff);
+        rescaleSlider(perimMinSlider, maxPerimeter);
+        rescaleMaxSlider(perimMaxSlider, maxPerimeter * 1.1, perimOff);
 
         // Sync filter values to actual slider positions in case JavaFX clamped them
         filter.setMinArea(areaMinSlider.getValue());
@@ -221,14 +228,37 @@ public class QualityFilterPane extends TitledPane {
         suppressEvents = false;
     }
 
-    private void syncMaxFilterValue(Slider slider, java.util.function.DoubleConsumer setter) {
-        double v = slider.getValue();
-        double range = slider.getMax() - slider.getMin();
-        if (range <= 0 || v >= slider.getMax() - range * 0.001) {
-            setter.accept(Double.MAX_VALUE);
-        } else {
-            setter.accept(v);
+    /**
+     * Raise a min/lower-bound slider's ceiling to match the data and keep its
+     * step proportional to the new range.
+     */
+    private void rescaleSlider(Slider slider, double newMax) {
+        if (newMax > slider.getMin()) {
+            slider.setMax(newMax);
         }
+        SliderUtils.applyRangeStep(slider);
+    }
+
+    /**
+     * Rescale a "max"/upper-bound slider to match the data. When the slider
+     * currently represents "off" (no upper bound), re-pin it to the top of the
+     * new range so it keeps reading "off" — otherwise raising the ceiling above
+     * the old value leaves the thumb stranded mid-track and {@link #syncMaxFilterValue}
+     * writes that stale value as a real active bound. Total intensity hits this
+     * because its data sums routinely exceed the initial slider ceiling.
+     */
+    private void rescaleMaxSlider(Slider slider, double newMax, boolean isOff) {
+        if (newMax > slider.getMin()) {
+            slider.setMax(newMax);
+        }
+        if (isOff) {
+            slider.setValue(slider.getMax());
+        }
+        SliderUtils.applyRangeStep(slider);
+    }
+
+    private void syncMaxFilterValue(Slider slider, java.util.function.DoubleConsumer setter) {
+        setter.accept(SliderUtils.maxSliderToBound(slider.getValue(), slider.getMin(), slider.getMax()));
     }
 
     /**
@@ -330,7 +360,7 @@ public class QualityFilterPane extends TitledPane {
     private Slider createSlider(double min, double max, double value) {
         Slider slider = new Slider(min, max, value);
         slider.setPrefWidth(150);
-        slider.setBlockIncrement((max - min) / 100);
+        SliderUtils.makeRangeFriendly(slider);
         return slider;
     }
 

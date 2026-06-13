@@ -379,7 +379,7 @@ public class GateEditorPane extends VBox {
 
         Slider slider = new Slider(-5, 5, node.getThreshold());
         slider.setPrefWidth(300);
-        slider.setBlockIncrement(0.01);
+        SliderUtils.makeRangeFriendly(slider);
         TextField valueField = new TextField(String.format("%.4f", node.getThreshold()));
         valueField.setPrefWidth(80);
         valueField.setStyle("-fx-text-fill: white; -fx-font-family: monospace; -fx-background-color: #3a3a3a;");
@@ -508,12 +508,12 @@ public class GateEditorPane extends VBox {
         if (sliderMinY >= sliderMaxY) { sliderMinY = -5; sliderMaxY = 5; }
 
         Slider sliderX = new Slider(sliderMinX, sliderMaxX, Math.max(sliderMinX, Math.min(sliderMaxX, gate.getThresholdX())));
-        sliderX.setBlockIncrement(0.01);
+        SliderUtils.makeRangeFriendly(sliderX);
         Label valX = new Label(String.format("%.3f", gate.getThresholdX()));
         valX.setStyle("-fx-text-fill: white; -fx-font-family: monospace;");
 
         Slider sliderY = new Slider(sliderMinY, sliderMaxY, Math.max(sliderMinY, Math.min(sliderMaxY, gate.getThresholdY())));
-        sliderY.setBlockIncrement(0.01);
+        SliderUtils.makeRangeFriendly(sliderY);
         Label valY = new Label(String.format("%.3f", gate.getThresholdY()));
         valY.setStyle("-fx-text-fill: white; -fx-font-family: monospace;");
 
@@ -1140,6 +1140,9 @@ public class GateEditorPane extends VBox {
         withSuppressedEvents(() -> {
             currentThresholdSlider.setMin(clipMin);
             currentThresholdSlider.setMax(clipMax);
+            // Re-pin the step to the new range so threshold "speed" matches the
+            // QC sliders whether the axis is z-score (~10 wide) or raw (~10000s wide).
+            SliderUtils.applyRangeStep(currentThresholdSlider);
         });
         updatePopulationCounts();
     }
