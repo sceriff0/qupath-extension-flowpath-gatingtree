@@ -216,8 +216,12 @@ public class GateEditorPane extends VBox {
                     String cx = get2DChannelX(currentNode);
                     String cy = get2DChannelY(currentNode);
                     if (cx != null && cy != null) {
-                        if (currentNode.isThresholdIsZScore()) applyClipAxisRangeZScore(currentScatter, cx, cy, currentNode);
-                        else applyClipAxisRange(currentScatter, cx, cy, currentNode);
+                        if (axesAreDefault(currentNode)) {
+                            if (currentNode.isThresholdIsZScore()) applyClipAxisRangeZScore(currentScatter, cx, cy, currentNode);
+                            else applyClipAxisRange(currentScatter, cx, cy, currentNode);
+                        } else {
+                            currentScatter.clearAxisRange();
+                        }
                     }
                 }
                 fireNodeChanged();
@@ -233,8 +237,12 @@ public class GateEditorPane extends VBox {
                     String cx = get2DChannelX(currentNode);
                     String cy = get2DChannelY(currentNode);
                     if (cx != null && cy != null) {
-                        if (currentNode.isThresholdIsZScore()) applyClipAxisRangeZScore(currentScatter, cx, cy, currentNode);
-                        else applyClipAxisRange(currentScatter, cx, cy, currentNode);
+                        if (axesAreDefault(currentNode)) {
+                            if (currentNode.isThresholdIsZScore()) applyClipAxisRangeZScore(currentScatter, cx, cy, currentNode);
+                            else applyClipAxisRange(currentScatter, cx, cy, currentNode);
+                        } else {
+                            currentScatter.clearAxisRange();
+                        }
                     }
                 }
                 fireNodeChanged();
@@ -612,8 +620,12 @@ public class GateEditorPane extends VBox {
                         }
                         scatter.setData(f[0], f[1], gate.getChannelX(), gate.getChannelY());
                         if (markerStats != null) {
-                            if (gate.isThresholdIsZScore()) applyClipAxisRangeZScore(scatter, gate.getChannelX(), gate.getChannelY(), gate);
-                            else applyClipAxisRange(scatter, gate.getChannelX(), gate.getChannelY(), gate);
+                            if (axesAreDefault(gate)) {
+                                if (gate.isThresholdIsZScore()) applyClipAxisRangeZScore(scatter, gate.getChannelX(), gate.getChannelY(), gate);
+                                else applyClipAxisRange(scatter, gate.getChannelX(), gate.getChannelY(), gate);
+                            } else {
+                                scatter.clearAxisRange();
+                            }
                         }
                     }
                 };
@@ -1378,9 +1390,7 @@ public class GateEditorPane extends VBox {
         Compartment compY = get2DCompartmentY(currentNode);
         Statistic statX = get2DStatisticX(currentNode);
         Statistic statY = get2DStatisticY(currentNode);
-        boolean defaultAxes =
-                (compX == null || (compX == Compartment.WHOLE_CELL && statX == Statistic.MEAN))
-             && (compY == null || (compY == Compartment.WHOLE_CELL && statY == Statistic.MEAN));
+        boolean defaultAxes = axesAreDefault(currentNode);
         // All 2D gate types (quadrant, polygon, rectangle, ellipse) use per-gate z-score flag
         double[][] filtered;
         if (currentNode.isThresholdIsZScore() && markerStats != null) {
@@ -1431,6 +1441,18 @@ public class GateEditorPane extends VBox {
         if (node instanceof EllipseGate eg) return eg.getChannelY();
         if (node instanceof QuadrantGate qg) return qg.getChannelY();
         return null;
+    }
+
+    /** True when both 2D axes show the default whole-cell mean (so markerStats-based
+     *  axis ranges are valid). Non-default compartment/statistic columns are not known
+     *  to markerStats, so callers should clearAxisRange() instead of applyClipAxisRange. */
+    private boolean axesAreDefault(GateNode node) {
+        Compartment compX = get2DCompartmentX(node);
+        Compartment compY = get2DCompartmentY(node);
+        Statistic statX = get2DStatisticX(node);
+        Statistic statY = get2DStatisticY(node);
+        return (compX == null || (compX == Compartment.WHOLE_CELL && statX == Statistic.MEAN))
+            && (compY == null || (compY == Compartment.WHOLE_CELL && statY == Statistic.MEAN));
     }
 
     private Compartment get2DCompartmentX(GateNode node) {
