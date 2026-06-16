@@ -1156,7 +1156,11 @@ public class GateEditorPane extends VBox {
         int markerIdx = cellIndex.getMarkerIndex(channel);
         if (markerIdx < 0) return;
 
-        double[] allValues = cellIndex.getMarkerValues(markerIdx);
+        Compartment comp = currentNode.getCompartment();
+        Statistic stat = currentNode.getStatistic();
+        double[] allValues = cellIndex.getResolvedColumn(channel, comp, stat);
+        boolean defaultSelection = comp == null || stat == null
+                || (comp == Compartment.WHOLE_CELL && stat == Statistic.MEAN);
         // Filter by ROI mask and ancestor mask, excluding NaN channel values
         // so downstream percentile/clip logic cannot produce NaN bounds.
         boolean hasMask = roiMask != null || ancestorMask != null;
@@ -1182,7 +1186,7 @@ public class GateEditorPane extends VBox {
                 for (double v : allValues) if (!Double.isNaN(v)) rawValues[j++] = v;
             }
         }
-        boolean useZ = currentNode.isThresholdIsZScore();
+        boolean useZ = currentNode.isThresholdIsZScore() && defaultSelection;
 
         double[] displayValues;
         if (useZ && markerStats.getStd(channel) > 1e-10) {
@@ -1205,11 +1209,24 @@ public class GateEditorPane extends VBox {
         // percentiles if they want to gate inside the tail.
         double pctLo = currentNode.getClipPercentileLow();
         double pctHi = currentNode.getClipPercentileHigh();
-        double clipLo = markerStats != null ? markerStats.getPercentileValue(channel, pctLo) : Double.NaN;
-        double clipHi = markerStats != null ? markerStats.getPercentileValue(channel, pctHi) : Double.NaN;
-        if (useZ && markerStats != null && markerStats.getStd(channel) > 1e-10) {
-            clipLo = markerStats.toZScore(channel, clipLo);
-            clipHi = markerStats.toZScore(channel, clipHi);
+        double clipLo;
+        double clipHi;
+        if (defaultSelection) {
+            // Default whole-cell-mean: keep the global per-marker axis so the same
+            // channel uses one axis everywhere it appears in the gate tree.
+            clipLo = markerStats != null ? markerStats.getPercentileValue(channel, pctLo) : Double.NaN;
+            clipHi = markerStats != null ? markerStats.getPercentileValue(channel, pctHi) : Double.NaN;
+            if (useZ && markerStats != null && markerStats.getStd(channel) > 1e-10) {
+                clipLo = markerStats.toZScore(channel, clipLo);
+                clipHi = markerStats.toZScore(channel, clipHi);
+            }
+        } else {
+            // Non-default compartment/statistic: markerStats only knows the bare
+            // whole-cell channel, so anchor the axis on the displayed column's own
+            // distribution. displayValues == rawValues here (z-score is a default-only
+            // axis), so percentiles of displayValues match the plotted data.
+            clipLo = percentileOf(displayValues, pctLo);
+            clipHi = percentileOf(displayValues, pctHi);
         }
 
         // Defensive fallback only when the global percentile is unusable
@@ -1241,6 +1258,29 @@ public class GateEditorPane extends VBox {
             SliderUtils.applyRangeStep(currentThresholdSlider);
         });
         updatePopulationCounts();
+    }
+
+    /**
+     * Linear-interpolated percentile of an array (NaNs ignored). Returns NaN for
+     * an empty/all-NaN input so the caller's badGlobal fallback engages.
+     * Package-private so PercentileOfTest (same package) can call it directly.
+     * @param pct percentile in [0,100]
+     */
+    static double percentileOf(double[] values, double pct) {
+        if (values == null || values.length == 0) return Double.NaN;
+        double[] sorted = new double[values.length];
+        int n = 0;
+        for (double v : values) if (!Double.isNaN(v)) sorted[n++] = v;
+        if (n == 0) return Double.NaN;
+        sorted = java.util.Arrays.copyOf(sorted, n);
+        java.util.Arrays.sort(sorted);
+        if (n == 1) return sorted[0];
+        double rank = (pct / 100.0) * (n - 1);
+        int lo = (int) Math.floor(rank);
+        int hi = (int) Math.ceil(rank);
+        if (lo == hi) return sorted[lo];
+        double frac = rank - lo;
+        return sorted[lo] * (1 - frac) + sorted[hi] * frac;
     }
 
     private boolean isThresholdGate(GateNode node) {
