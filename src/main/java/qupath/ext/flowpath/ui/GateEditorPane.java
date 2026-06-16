@@ -1023,6 +1023,7 @@ public class GateEditorPane extends VBox {
             if (!suppressEvents && currentNode != null) {
                 setComp.accept(compCombo.getValue());
                 updateHistogram();
+                refreshScatterPlot();
                 fireNodeChanged();
             }
         });
@@ -1050,6 +1051,7 @@ public class GateEditorPane extends VBox {
                 if (!suppressEvents && currentNode != null) {
                     setStat.accept(statCombo.getValue());
                     updateHistogram();
+                    refreshScatterPlot();
                     fireNodeChanged();
                 }
             });
