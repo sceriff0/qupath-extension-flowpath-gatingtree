@@ -495,9 +495,11 @@ public class GateEditorPane extends VBox {
             if (mxI >= 0 && myI >= 0) {
                 double[][] fData;
                 if (gate.isThresholdIsZScore() && markerStats != null) {
-                    fData = getFilteredXYWithZScore(mxI, myI, gate.getChannelX(), gate.getChannelY());
+                    fData = getFilteredXYWithZScore(gate.getChannelX(), gate.getCompartmentX(), gate.getStatisticX(),
+                            gate.getChannelY(), gate.getCompartmentY(), gate.getStatisticY());
                 } else {
-                    fData = getFilteredXY(mxI, myI);
+                    fData = getFilteredXY(gate.getChannelX(), gate.getCompartmentX(), gate.getStatisticX(),
+                            gate.getChannelY(), gate.getCompartmentY(), gate.getStatisticY());
                 }
                 if (fData[0].length > 0) {
                     double dMinX = Double.MAX_VALUE, dMaxX = -Double.MAX_VALUE;
@@ -574,9 +576,11 @@ public class GateEditorPane extends VBox {
                 // Transform data to z-score space when thresholds are z-score based
                 double[][] filtered;
                 if (gate.isThresholdIsZScore() && markerStats != null) {
-                    filtered = getFilteredXYWithZScore(mxIdx, myIdx, gate.getChannelX(), gate.getChannelY());
+                    filtered = getFilteredXYWithZScore(gate.getChannelX(), gate.getCompartmentX(), gate.getStatisticX(),
+                            gate.getChannelY(), gate.getCompartmentY(), gate.getStatisticY());
                 } else {
-                    filtered = getFilteredXY(mxIdx, myIdx);
+                    filtered = getFilteredXY(gate.getChannelX(), gate.getCompartmentX(), gate.getStatisticX(),
+                            gate.getChannelY(), gate.getCompartmentY(), gate.getStatisticY());
                 }
                 ScatterPlotCanvas scatter = new ScatterPlotCanvas();
                 scatter.setData(filtered[0], filtered[1], gate.getChannelX(), gate.getChannelY());
@@ -600,9 +604,11 @@ public class GateEditorPane extends VBox {
                     if (mx >= 0 && my >= 0) {
                         double[][] f;
                         if (gate.isThresholdIsZScore() && markerStats != null) {
-                            f = getFilteredXYWithZScore(mx, my, gate.getChannelX(), gate.getChannelY());
+                            f = getFilteredXYWithZScore(gate.getChannelX(), gate.getCompartmentX(), gate.getStatisticX(),
+                                    gate.getChannelY(), gate.getCompartmentY(), gate.getStatisticY());
                         } else {
-                            f = getFilteredXY(mx, my);
+                            f = getFilteredXY(gate.getChannelX(), gate.getCompartmentX(), gate.getStatisticX(),
+                                    gate.getChannelY(), gate.getCompartmentY(), gate.getStatisticY());
                         }
                         scatter.setData(f[0], f[1], gate.getChannelX(), gate.getChannelY());
                         if (markerStats != null) {
@@ -705,9 +711,11 @@ public class GateEditorPane extends VBox {
                 // Transform data to z-score space when z-score mode is active
                 double[][] filtered;
                 if (node.isThresholdIsZScore() && markerStats != null) {
-                    filtered = getFilteredXYWithZScore(mxIdx, myIdx, chX, chY);
+                    filtered = getFilteredXYWithZScore(chX, Compartment.WHOLE_CELL, Statistic.MEAN,
+                            chY, Compartment.WHOLE_CELL, Statistic.MEAN);
                 } else {
-                    filtered = getFilteredXY(mxIdx, myIdx);
+                    filtered = getFilteredXY(chX, Compartment.WHOLE_CELL, Statistic.MEAN,
+                            chY, Compartment.WHOLE_CELL, Statistic.MEAN);
                 }
                 scatter.setData(filtered[0], filtered[1], chX, chY);
                 if (markerStats != null) {
@@ -824,9 +832,11 @@ public class GateEditorPane extends VBox {
                     if (mx >= 0 && my >= 0) {
                         double[][] f;
                         if (node.isThresholdIsZScore() && markerStats != null) {
-                            f = getFilteredXYWithZScore(mx, my, cx, cy);
+                            f = getFilteredXYWithZScore(cx, Compartment.WHOLE_CELL, Statistic.MEAN,
+                                    cy, Compartment.WHOLE_CELL, Statistic.MEAN);
                         } else {
-                            f = getFilteredXY(mx, my);
+                            f = getFilteredXY(cx, Compartment.WHOLE_CELL, Statistic.MEAN,
+                                    cy, Compartment.WHOLE_CELL, Statistic.MEAN);
                         }
                         scatter.setData(f[0], f[1], cx, cy);
                         if (markerStats != null) {
@@ -1106,9 +1116,10 @@ public class GateEditorPane extends VBox {
         }
     }
 
-    private double[][] getFilteredXY(int mxIdx, int myIdx) {
-        double[] allX = cellIndex.getMarkerValues(mxIdx);
-        double[] allY = cellIndex.getMarkerValues(myIdx);
+    private double[][] getFilteredXY(String chX, Compartment compX, Statistic statX,
+                                     String chY, Compartment compY, Statistic statY) {
+        double[] allX = cellIndex.getResolvedColumn(chX, compX, statX);
+        double[] allY = cellIndex.getResolvedColumn(chY, compY, statY);
         boolean hasMask = roiMask != null || ancestorMask != null;
         if (!hasMask) return new double[][]{allX, allY};
         int count = 0;
@@ -1127,8 +1138,9 @@ public class GateEditorPane extends VBox {
      * Like getFilteredXY but transforms values to z-score space.
      * Used for quadrant gate scatter plots where thresholds are in z-score space.
      */
-    private double[][] getFilteredXYWithZScore(int mxIdx, int myIdx, String chX, String chY) {
-        double[][] raw = getFilteredXY(mxIdx, myIdx);
+    private double[][] getFilteredXYWithZScore(String chX, Compartment compX, Statistic statX,
+                                               String chY, Compartment compY, Statistic statY) {
+        double[][] raw = getFilteredXY(chX, compX, statX, chY, compY, statY);
         if (markerStats == null) return raw;
         double[] fx = raw[0];
         double[] fy = raw[1];
@@ -1362,20 +1374,32 @@ public class GateEditorPane extends VBox {
         int mxIdx = cellIndex.getMarkerIndex(chX);
         int myIdx = cellIndex.getMarkerIndex(chY);
         if (mxIdx < 0 || myIdx < 0) return;
+        Compartment compX = get2DCompartmentX(currentNode);
+        Compartment compY = get2DCompartmentY(currentNode);
+        Statistic statX = get2DStatisticX(currentNode);
+        Statistic statY = get2DStatisticY(currentNode);
+        boolean defaultAxes =
+                (compX == null || (compX == Compartment.WHOLE_CELL && statX == Statistic.MEAN))
+             && (compY == null || (compY == Compartment.WHOLE_CELL && statY == Statistic.MEAN));
         // All 2D gate types (quadrant, polygon, rectangle, ellipse) use per-gate z-score flag
         double[][] filtered;
         if (currentNode.isThresholdIsZScore() && markerStats != null) {
-            filtered = getFilteredXYWithZScore(mxIdx, myIdx, chX, chY);
+            filtered = getFilteredXYWithZScore(chX, compX, statX, chY, compY, statY);
         } else {
-            filtered = getFilteredXY(mxIdx, myIdx);
+            filtered = getFilteredXY(chX, compX, statX, chY, compY, statY);
         }
         currentScatter.setData(filtered[0], filtered[1], chX, chY);
-        if (markerStats != null) {
+        if (markerStats != null && defaultAxes) {
+            // markerStats only knows the bare whole-cell channels; only anchor the
+            // axis range when both axes show that default. Otherwise let the scatter
+            // auto-fit to the displayed (resolved) data.
             if (currentNode.isThresholdIsZScore()) {
                 applyClipAxisRangeZScore(currentScatter, chX, chY, currentNode);
             } else {
                 applyClipAxisRange(currentScatter, chX, chY, currentNode);
             }
+        } else {
+            currentScatter.clearAxisRange();
         }
     }
 
@@ -1407,5 +1431,25 @@ public class GateEditorPane extends VBox {
         if (node instanceof EllipseGate eg) return eg.getChannelY();
         if (node instanceof QuadrantGate qg) return qg.getChannelY();
         return null;
+    }
+
+    private Compartment get2DCompartmentX(GateNode node) {
+        if (node instanceof QuadrantGate qg) return qg.getCompartmentX();
+        return Compartment.WHOLE_CELL;
+    }
+
+    private Compartment get2DCompartmentY(GateNode node) {
+        if (node instanceof QuadrantGate qg) return qg.getCompartmentY();
+        return Compartment.WHOLE_CELL;
+    }
+
+    private Statistic get2DStatisticX(GateNode node) {
+        if (node instanceof QuadrantGate qg) return qg.getStatisticX();
+        return Statistic.MEAN;
+    }
+
+    private Statistic get2DStatisticY(GateNode node) {
+        if (node instanceof QuadrantGate qg) return qg.getStatisticY();
+        return Statistic.MEAN;
     }
 }
