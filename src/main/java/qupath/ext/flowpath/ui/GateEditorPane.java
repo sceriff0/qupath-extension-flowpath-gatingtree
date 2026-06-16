@@ -594,10 +594,14 @@ public class GateEditorPane extends VBox {
                 scatter.setData(filtered[0], filtered[1], gate.getChannelX(), gate.getChannelY());
                 scatter.setCrosshairOverlay(gate.getThresholdX(), gate.getThresholdY());
                 if (markerStats != null) {
-                    if (gate.isThresholdIsZScore()) {
-                        applyClipAxisRangeZScore(scatter, gate.getChannelX(), gate.getChannelY(), gate);
+                    if (axesAreDefault(gate)) {
+                        if (gate.isThresholdIsZScore()) {
+                            applyClipAxisRangeZScore(scatter, gate.getChannelX(), gate.getChannelY(), gate);
+                        } else {
+                            applyClipAxisRange(scatter, gate.getChannelX(), gate.getChannelY(), gate);
+                        }
                     } else {
-                        applyClipAxisRange(scatter, gate.getChannelX(), gate.getChannelY(), gate);
+                        scatter.clearAxisRange();
                     }
                 }
                 applyBranchColorsToScatter(scatter, gate);
