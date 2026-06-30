@@ -1,90 +1,53 @@
-# QuPath Extension: FlowPath - GatingTree
+# FlowPath - GatingTree
 
 [![QuPath](https://img.shields.io/badge/QuPath-%E2%89%A50.7.0-blue.svg)](https://qupath.github.io/)
 [![Java](https://img.shields.io/badge/Java-25-orange.svg)](https://jdk.java.net/25/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-flowpath.readthedocs.io-success.svg)](https://flowpath.readthedocs.io/)
 
-Interactive tree-based cell phenotyping for [QuPath](https://qupath.github.io/). Build hierarchical marker gates with live visualization, drag thresholds, draw 2D regions, and see cells update in real time on multiplexed imaging data (CODEX, MIBI, mIF).
+Interactive **tree-based cell phenotyping** for [QuPath](https://qupath.github.io/).
+Build hierarchical marker gates (e.g. `CD45+ → CD3+ → CD8+ = "T cytotoxic"`), drag
+thresholds, draw 2D regions, and see cells recolor in real time on multiplexed
+imaging data (CODEX, MIBI, mIF).
 
-Designed to work with the [mirage](https://github.com/sceriff0/mirage) pipeline for end-to-end multiplexed image analysis — from raw images to cell phenotypes.
+Part of the [FlowPath suite](https://flowpath.readthedocs.io/), alongside
+[qUMAP](https://github.com/sceriff0/qupath-extension-flowpath-qumap) and
+[AnnoMask](https://github.com/sceriff0/qupath-extension-annomask). Designed to
+work with the [MIRAGE](https://mirage-pipeline.readthedocs.io/) pipeline.
 
-See also [FlowPath - qUMAP](https://github.com/sceriff0/qupath-extension-flowpath-qumap) for UMAP dimensionality reduction visualization. Install both from the [FlowPath catalog](https://github.com/sceriff0/flowpath-catalog).
+## Install
 
-<!-- Add screenshots here -->
+In QuPath, add the FlowPath catalog and install **GatingTree**:
 
-## Features
+```
+https://raw.githubusercontent.com/sceriff0/flowpath-catalog/main/catalog.json
+```
 
-- **Hierarchical gating** — Multi-level gate tree (e.g., CD45+ > CD3+ > CD8+ = "T cytotoxic")
-- **Multiple gate types** — Threshold (1D), quadrant (2D dual-threshold), polygon, rectangle, and ellipse gates
-- **Live histogram & scatter plots** — Per-marker histogram with draggable threshold; 2D scatter plots with interactive gate drawing and crosshair visualization for quadrant gates
-- **Real-time preview** — Cells update color and phenotype within ~100ms
-- **Raw / Z-score toggle** — Switch value modes per gate
-- **Quality filters** — Pre-gating QC with min+max for area, eccentricity, solidity, total intensity, and perimeter
-- **Outlier exclusion** — Per-gate percentile clipping with scatter plot axis zoom to clipped range
-- **Undo / Redo** — Snapshot-based undo stack (Ctrl+Z / Ctrl+Shift+Z)
-- **Drag-and-drop reordering** — Rearrange gates in the tree by dragging between branches
-- **Save / Load / Export** — Gate trees as JSON (backward-compatible), phenotypes as CSV
+(Extensions → Manage extensions → Manage extension catalogs → Add.) Launch with
+**Extensions → FlowPath - GatingTree** (`Ctrl+G`). Full install options — JAR
+drop, build from source — are in the [docs](https://flowpath.readthedocs.io/installation/).
 
-## Installation
-
-### From QuPath Extension Manager
-
-1. Open QuPath → `Extensions` → `Manage extensions` → `Manage extension catalogs` → `Add`
-2. Paste: `https://raw.githubusercontent.com/sceriff0/flowpath-catalog/main/catalog.json`
-3. Go back to `Manage extensions` → find **FlowPath - GatingTree** → click `+` to install
-4. Restart QuPath
-
-### From Release JAR
-
-Download the latest JAR from [Releases](../../releases) and drag it onto QuPath.
-
-### Build from Source
+## Build from source
 
 ```bash
 git clone https://github.com/sceriff0/qupath-extension-flowpath-gatingtree.git
 cd qupath-extension-flowpath-gatingtree
-./gradlew build
-# JAR at build/libs/FlowPath-1.0.0.jar → drag onto QuPath
+./gradlew build   # JAR lands in build/libs/ → drag onto QuPath
 ```
 
-## Quick Start
+## 📖 Documentation
 
-1. Open your pyramidal OME-TIFF in QuPath
-2. Import cell detections (GeoJSON with marker intensities, e.g., from [mirage](https://github.com/sceriff0/mirage))
-3. `Extensions` > `FlowPath - GatingTree` (or `Ctrl+G`)
-4. Set quality filters to remove segmentation artifacts (area, eccentricity, solidity, perimeter, total intensity)
-5. Add root gate → pick gate type (threshold, quadrant, polygon, rectangle, ellipse)
-6. For threshold gates: select channel → drag threshold on histogram
-7. For 2D gates: select X/Y channels → draw region on scatter plot
-8. Build hierarchy: add child gates to branches for sub-gating
-9. Name leaf nodes (e.g., "T cytotoxic", "Stroma")
-10. Export CSV
-
-## Output Formats
-
-**GatingTree JSON** (`flowpath.json`) — Saves the full gate hierarchy, thresholds, colors, and quality filter settings. Load to reproduce gating.
-
-**Phenotype CSV** (`gate_pheno.csv`) — One row per cell with phenotype name and per-marker +/- status:
-
-```csv
-cell_id,phenotype,CD45,CD3,CD8,PANCK
-0,T cytotoxic,+,+,+,-
-1,Tumor,-,-,-,+
-```
-
-Excluded cells (QC-filtered or outlier-excluded) are omitted when "Exclude from CSV" is enabled.
-
-## Acknowledgments
-
-- **[QuPath](https://qupath.github.io/)** — Open-source bioimage analysis platform
-  > Bankhead, P. et al. (2017). QuPath: Open source software for digital pathology image analysis. *Scientific Reports*, 7, 16878. https://doi.org/10.1038/s41598-017-17204-5
+Features, the gating workflow, output formats, and troubleshooting are all at
+**<https://flowpath.readthedocs.io/>**.
 
 ## Citation
 
-If you use this tool in your research, please cite:
+> FlowPath: Interactive tree-based cell phenotyping for QuPath. (2026).
+> https://github.com/sceriff0/qupath-extension-flowpath-gatingtree
 
-> FlowPath: Interactive tree-based cell phenotyping for QuPath. (2026). https://github.com/sceriff0/qupath-extension-flowpath-gatingtree
+See the [citation page](https://flowpath.readthedocs.io/citation/) for QuPath and
+MIRAGE references.
 
 ## License
 
-MIT License. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
